@@ -1,0 +1,477 @@
+day 1 and Day2 :
+1.Before you going to do this first understand what ist he game and how to play it .
+2.we represent 0 as empty ,1 as white and -1 as black.The state is the current position of the board.
+3.State is nothing but how the board look like:
+. . . . .
+. . X . .
+. . O . .
+. . . . .
+. . . . .
+4.Action :What move should I make?
+5.Reward :The reward tells the agent whether the game outcome was good or bad.
+Win  → +1
+Loss → -1              The important part is that the agent doesn't receive the final reward after every move.
+6.It usually gets the important learning signal from the eventual game outcome.That's why self-play becomes interesting.
+7.Current State
+      ↓
+Neural Network     The network produces a policy.
+8."How promising does each possible move look?" Policy = which moves look promising.
+   for example : Move A → 0.40
+Move B → 0.20
+Move C → 0.15
+Move D → 0.05
+9.The same neural network also produces a value."How good is this position?"  ex:V(state) = +0.7
+10.Our neural network might say:  Move A → 60%     Move B → 20%    Move C → 10%
+11.So instead of blindly choosing Move A, we use Monte Carlo Tree Search.MCTS explores possible future moves.
+12.If I play A, what might happen?"
+"If I play B, what might happen?"
+"Which line appears strongest?"        The neural network guides the search.
+13.Normally, you might train a Go AI using human games:AlphaGo Zero takes a different approach.
+14.Let the AI generate its own training data.Those experiences become training data.
+Then we train the network.Then the improved network plays more games.Then we train again.
+15.components: 
+   a.1. Go Environment  : Responsible for:board,legal moves,captures,turns,game termination.
+   2. MCTS              : Responsible for:tree,selection,expansion,evaluation,backup
+   3. Neural Network    : Responsible for:policy,value,residual blocks.
+   4. Self-Play         : Responsible for:AI vs AI,generating training examples
+   5. Training          : Responsible for:replay buffer,loss,backpropagation,updating the network
+   6. Evaluation        : Responsible for:AI vs AI,win rate,comparing generations
+
+1.We need some kind of look-ahead search.That's where MCTS comes in.Instead of selecting high probabiltiy moves.
+2.Imagine you're playing chess and thinking: "If I make this move, what will the opponent do?"
+  then : If they do that, what should I do?" You're mentally creating a tree.
+3.Why can't we search the entire Go tree? : Because Go has an enormous number of possible games.Even on a 9×9 board, the number of possible game sequences is huge.
+4.Instead we want Explore the most promising parts of the tree.That's the basic idea behind MCTS.
+5.The four steps of MCTS :(SEEB)
+   Step 1 — Selection :Start at the root.We need to decide which branch to explore.
+                    MCTS doesn't simply pick a random branch.It balances:
+                      Exploitation  : "This move has performed well before."
+                      Exploration   :  "We haven't investigated this move much yet.
+            This is called the:     exploration vs exploitation problem
+        AlphaGo Zero uses a PUCT-style selection rule:  a∗=argamax​[Q(s,a)+U(s,a)]
+                 where : Q :How good has action a been based on previous searches?
+                         U :is the exploration term
+                           =U(s,a)=cpuct​P(s,a)*(ROOT(N(s))/1+N(s,a))
+                           P(s,a) :The neural network's prior probability for move a
+                           N(s)   :Number of times the parent state has been visited.
+                           N(s,a) :Number of times we have selected action a.
+                           c_puct :Controls how strongly we encourage exploration.
+            NOTE : The neural network does not simply say:Play the highest-probability move."
+            INSTEAD :Neural Network gives rior probabilities and thenMCTS uses them to guide search  and then MCTS investigates positions and then Final move selection.
+   Step 2 — Expansion  :Eventually MCTS reaches a node that hasn't been explored.We expand that node by generating its legal moves.
+                       Now those moves are available to explore.
+   Step 3 — Evaluation  :n traditional MCTS, you might perform a random simulation/rollout until the game ends.
+                        But AlphaGo Zero does something different.It uses the neural network.
+                        The network receives the new board: adn then it is gien to the neural network and policy ,value are genertated.
+​​                         AlphaGo Zero does not need random rollouts to the end of every game. 
+   Step 4 — Backup     : We propagate that information back through the path we followed.The result is backed up:This updates the search tree.
+6.After complettion of these four steps ,qe have completed the four steps which means we have completed the one simulation.
+7.But one simulation isn't enough.We repeat this many times.After many simulations :MCTS now has much more information.
+8.So instead of:Neural network says B = 40%.we have:MCTS says B was explored most successfully and the agent selects B according to the final search policy.
+9.What information does every MCTS edge/node maintain?
+         N   : How many times has this action/state been visited?
+         W   : What is the accumulated evaluation?
+         Q   : Average value.Q=W/N
+         P   : Prior probability.
+10.MCTS is NOT the same as the neural network.​
+
+day 3 :
+goal:We need to create the environment that allows our AI to do this:
+             Go Environment to  State   
+                                ctions      any one make to calin a reward and next state.
+                                Rules
+1.Our environment is responsible for the game, not the AI.The neural network and MCTS come later.
+2.we will be o-index indexing throughout the project.
+3.we can 82 moves initially ,where 81 are board postions and 82 is pass.
+4.we need to maintain the player turns by marking black =1 and wite=-1.
+5.legal moves riles :
+    rule 1:position must be empty.
+    rule 2:captures can occur.
+    rule 3:Suicide is generally illegal.
+6.Liberty:supoose if i placed a stone and it surrounding by the empty places  then this empty neighbours are called its libertiees.Max a stone can have upto 4 liberties.
+7.connected stones of same color are form a group.Liberties are belongs to entire group not to a single individual stone.If  a group has zero liberties they group is captured and entire group is removed.
+8.For findng these liberties and removing it we need a flood-fill or bfs or dfs algorithm.we actually can use a BFS OR DFS.
+9.CORE mAKE_MOVE():
+    a. Check whether (4,4) is empty
+    b. Temporarily place Black
+    c. Check neighboring opponent groups
+    d. Capture any opponent groups with zero liberties 
+    e.  Check whether Black's resulting group has liberties
+    f. If illegal → undo move
+    g. If legal → keep move
+    h. Switch player
+10.suicide move should be injhected.important rue :Ko prevents immediate repetition of a previous board position
+11.if both players pass cponsecutibely then the game can end.
+12.Game termination: our rules.
+13.environment : methiofns of class Gogame:
+reset()              :start a new gamea
+get_state()          :return current board/state.
+get_legal_moves()    :return cirretn all legal moves.
+make_move(action)    :Executes selected moves.
+is_game_over()       :returns true or false.
+get_winner()         :tells the winner whether black or white.
+14.go environment knows : Board Rules Legal moves Captures Turns Game termination  Winner
+15.go environment doesnot know: Neural network MCTS Policy Training Backpropagation Self-play strategy
+16.MCTS
+ ├── Ask environment:
+ │      "What moves are legal?"
+ ├── Choose a move
+ ├── Ask environment:
+ │      "What is the next state?"
+ ├── Neural network evaluates state
+ └── Continue search
+ 17.
+
+ day 4:
+ a.to day we ate going to create a go environment.first create the given folder structure.
+ b.today our main agenda is building the environment/go_game and tests/go_game.
+ c.Then install numpy dependency and then go the environment/go_game.py.
+ d.in that create a class of GoGame and in that create a Function reset() and intialization function.
+ e.then test the board.write a function forthe get neighbours and is on board.
+ f.Then code for whether the given postion is empty or not and place a stone and also a switch players.
+ g.now comes the deection of the groups by the bfs algorithm.and then code the finding the liberties.
+ h.then add a remove gropu finction.Then write code for the capturing o the opponent group.
+ i.Then code for the make_move function.Here old_board copy of board is saved for restoring the previous places if the player plays illegal moves.
+ j.then Test for the occupied position,suicdeand then build pass and test it.
+ k.now create the proper tests by not relying in the manual print() statements.
+ l.assert len(group) == 3  if the group length us not 3 then program stops and shows error.
+ m.The tests are : Tests neighbors,liberties,group,normal move,occupiedposition,suicide,pass.
+ n.Then tests the cases as :pytest -v.
+ o.or python -m pytest.
+
+
+ DAY 5:
+ 1.understand ko rule.This is the most important new Go rule today.
+ 2.Black captures White
+        ↓
+Board becomes position A
+        ↓
+White immediately captures Black
+        ↓
+Board becomes position B
+        ↓
+Black immediately captures again
+        ↓
+Position A comes back
+3.Without the Ko rule, the players could repeat forever.So Go prevents certain immediate repetitions.
+4.For our project, we will use a simple positional Ko rule:A move is illegal if it produces a board position that has already occurred in the game., and it is known broadly as the Superko rule.
+5.Basic Ko    :A player cannot immediately recapture a single stone if it recreates the exact previous local position. You must play a "ko threat" elsewhere first.
+6.Positional Superko  :A move is illegal if it recreates any full-board position that has occurred at any point earlier in the game.
+7.Situational Superko  :A move is illegal only if it recreates a previous full-board position and it is the same player's turn to move.
+8.modify the reset to store the history and then create a board_hush get function move.
+9.Save board
+    ↓
+Try move
+    ↓
+Capture
+    ↓
+Check suicide
+    ↓
+Check Ko
+    ↓
+Legal?
+   / \
+ YES  NO
+  ↓    ↓
+Keep Restore
+10.and then update themake_move() function.
+11.Normally that looks like suicide.But what if the move captures an opponent group.Then removing the opponent stones creates libert
+12.MCTS needs to knowWhat actions can I legally choose from this position?".so please add the get_legal_moves funvtiontothe go_game.py enivironment.
+13.Also we need check which move is legal so we created a is_legal_move fiuntion.
+14.Also  please create position_to_action and action_to_position().
+15.create a function to restore and save game states,which is needed by the MCTS.
+16.add a set_state function t restore the state.
+17.define the functions to store the display and count no of whitesa nd back in a curretn state.
+18function to identify the empty regions and places in a particular state.
+19.find the territory from the funcyoon and then we nees the score to find that we create a find_score function.
+20.And to print final result we create a function.adn then to test he game we created a random fucntion hee.
+21.today tests are :
+    a.test_action_conversion:
+    b.test_inital legal moves:
+    c.test occupied move:
+    d.test state save/restore:
+    e.test pass :
+    f.test countstones:
+
+day 6:
+1.Today we begin withth search component of the alphago zero that is MCTS.
+2.Normal MCTS rely on random simulations but alphago zero mcts will now take random simulations but we use the policy and value to do this simulations.
+3.Each node has to remamber :State          Parent            Move that created this node
+                            Children        Visit count        Total value           
+                            Prior probability(This will eventually come from the neural network's policy.)
+4.create a mcts folder and crete node.py file and code for that and then create a file inside the tests andthen run the tests.
+5.
+
+day 7:
+1.Today we are going to combine two componetns they are :environment of go gamea dn the mcts.
+2.MCTS wants to try:It needs temporary copies.herefore, in your GoGame, use the existing state interface:
+3.Board State
+    ↓
+Neural Network
+    ↓
+ ┌───────────────┐
+ │ Policy Head   │ → probability of every move
+ │ Value Head    │ → expected winner/value
+ └───────────────┘
+    ↓
+MCTS
+    ↓
+Select best move
+
+4.pip install torch and then code for the network.py in the metwork for creating a model.
+5.you can also runt he tests using this :python tests/test_network.py.before that code for the tests_network.py inside the tests folder.
+6.Your network expects: (batch, channels, height, width) .If your existing Go environment already has a state encoder, use that.
+7.mcts needsa network evaluator so in mcts i tis imported.Alphago goes different comparing wiht normal n=mcts by not having a random rollout instead we have network and policy/value.
+8.Add Dirichlet noise :P'(a)=(1 - ε)P(a)+εη(a)
+      P(a) = neural network probability                 η(a) = Dirichlet noise
+      ε = noise weight
+    AlphaGo Zero adds exploration noise at the root.
+9.add that add_dirchet_noise in mcts.py file.
+10.Q = exploitation        U = exploration
+  U = c_puct × P × √N_parent / (1 + N_child)
+  Score = Q + U
+11.MCTS doesn't simply choose the highest Q.Therefore it can still investigate promising moves that haven't been visited much.
+12.After evaluating a leaf:value must be propagated back through the tree.
+13.             ROOT
+              │
+        ┌─────┼─────┐
+        ↓     ↓     ↓
+       A      B     C
+       │      │     │
+       ↓      ↓     ↓
+     select  select select
+        │
+        ↓
+      Leaf
+        │
+        ↓
+ Neural Network
+        │
+   ┌────┴────┐
+   ↓         ↓
+Policy      Value
+   │         │
+   └────┬────┘
+        ↓
+      Backup
+        │
+        ↓
+       Root
+14.Then create atestcase for the mcts_network in tests d run.
+15.At this stage your neural network is randomly initialized.That is completely normal.You are not yet testing playing strength.Training comes later.
+16.
+
+
+DAY 8:
+1.finish/Check the GoBoard environment.create a encoder and policy-value network.Test neural network wihtthe go position.
+2.Connect the MCTS with the with the netrwork conceptually.
+3.as in network.py you have policy=f.softmax(),Where yiu have policy values add upto 1.
+4.Your network assumes the input is:3 × 12 × 12
+Plane 0 → current player's stones
+Plane 1 → opponent's stones
+Plane 2 → empty locations
+5.connect the gogame withthe network.py.
+6.e are going to make network_Evaluator.py responsible for converting a Go position into the format expected by GoNetwork.
+7.modift test_mcts_network by pasting anothe fucntion of test_network_evaluator.
+8.how pytsts works:
+   a.By default, Pytest searches your entire project structure, but standard project layouts place all testing files inside a root directory named tests/ or test/.
+   b.Keeping tests in a dedicated folder ensures that source directories (like src/, utils/, or app/) are only executed when your application actually runs, preventing unwanted side effects during testing.
+   c.Pytest uses a Python programming technique called Introspection. Instead of running your script from top to bottom like a normal Python file, Pytest treats your files as data to be inspected.
+   d.your_project/
+    │
+    ├── tests/                     <-- Pytest automatically scans this folder
+    │   ├── test_authentication.py <-- Match: Starts with 'test_'
+    │   └── payment_test.py        <-- Ignored: Does not start with 'test_'
+    e.ile Names: Must start with test_*.py or end with *_test.py.
+    f.Must start exactly with test_ 
+9.policy, value = evaluator.evaluate(game) :instead of manually extracting the board.
+10.At this point we're only making:MCTS → NetworkEvaluator → GoNetwork work.
+11.MCTS stores that probability in the corresponding child:
+     Child Node
+    │
+    ├── move
+    ├── visits
+    ├── value
+    └── prior  ← neural network
+12.Add tests case for findinthe puct score for the ncts.py
+13.toda work is over.
+
+
+Day 9:
+1.Modify the self_play/self_play.py andcode for that.
+2.SELF_PLAY ALL THE happenign like this :
+START GAME
+    ↓
+Current board
+    ↓
+MCTS
+    ↓
+Policy
+    ↓
+Store:
+(state, policy, player)
+    ↓
+Choose move
+    ↓
+Play move
+    ↓
+New board
+    ↓
+MCTS
+    ↓
+Policy
+    ↓
+Store
+    ↓
+Choose move
+    ↓
+Play move
+    ↓
+...
+    ↓
+GAME OVER
+3.                 SELF PLAY
+                    │
+                    ↓
+              ┌───────────┐
+              │ Go Game   │
+              └─────┬─────┘
+                    │
+                    ↓
+              ┌───────────┐
+              │   MCTS    │
+              └─────┬─────┘
+                    │
+              ┌─────┴─────┐
+              ↓           ↓
+           Policy        Move
+              │           │
+              ↓           ↓
+         Store state    Go Game
+              │           │
+              │           ↓
+              │        new state
+              │           │
+              └───────────┘
+                    │
+                    ↓
+                Game End
+                    │
+                    ↓
+                 Winner
+                    │
+                    ↓
+          Assign value to states
+                    │
+                    ↓
+        ┌──────────────────────┐
+        │ Self-play dataset    │
+        │                      │
+        │ (state, policy,value)│
+        └──────────────────────┘
+
+day 10:
+1.Code for the__init__.py and then code for the dataset.py.
+2.Then code for the trainer.py and then it is used for:
+3.Network(state)
+       ↓
+ predicted policy
+ predicted value
+       ↓
+match
+       ↓
+MCTS policy
+game result
+4.Alphago Zero uses stochastic gradient descent  with momentum
+5.The policy loss is:-sigma(piealogaP)
+6. The complete AlphaGo Zero objective also contains an L2 regularization term:
+  L=Lp+Lv+c||teta2||
+7.create the all the files inside the training trainer.py,train.py and checkpoints foldr and tests_trianing.py .
+8.[ ] Create training/__init__.py
+[ ] Create training/dataset.py
+[ ] Create training/trainer.py
+[ ] Create training/train.py
+
+[ ] Implement SelfPlayDataset
+[ ] Implement DataLoader
+[ ] Implement policy loss
+[ ] Implement value loss
+[ ] Implement combined loss
+[ ] Implement SGD + momentum
+[ ] Implement train_epoch()
+[ ] Implement checkpoint saving
+[ ] Implement checkpoint loading
+
+[ ] Create tests/test_training.py
+[ ] Test Dataset
+[ ] Test loss
+[ ] Test weight updates
+[ ] Test checkpoint
+
+[ ] Run pytest
+[ ] Confirm all tests pass
+9.┌─────────────────────┐
+             │ Current Network θ   │
+             └──────────┬──────────┘
+                        ↓
+                  SELF-PLAY
+                        ↓
+             ┌─────────────────────┐
+             │ (s, π, z) examples  │
+             └──────────┬──────────┘
+                        ↓
+                    TRAINING
+                        ↓
+             ┌─────────────────────┐
+             │  L = Lpolicy + Lvalue│
+             └──────────┬──────────┘
+                        ↓
+                  Backpropagation
+                        ↓
+                 SGD / Momentum
+                        ↓
+             ┌─────────────────────┐
+             │ New Network θ'      │
+             └──────────┬──────────┘
+                        │
+                        └──────────→ next self-play
+
+Day 11:
+1.Create folders data and models for some uses in future.
+2,Modify self_play class for me please.
+3.By importing the torch.
+4.Game 1
+ ↓
+examples
+
+Game 2
+ ↓
+examples
+
+Game 3
+ ↓
+examples
+
+...
+
+Game 5
+ ↓
+examples
+
+        ↓
+
+combined dataset
+7.Then create a generate_data.py in self_play and then check_dataset.py in data.
+8.network/load_model.py  is created and then code for that.
+
+
+
+Day 13:
+1.Please create the list of the evaluation folder and diles inside it and code for it please.
+2.code for the model_loader.py in network folder.
+3.please create the test cases for the model_loader and then create /add a evaluate function for m eplease.
+4.Then create the test cases for the network_evaluator and then tets that test case.
+5.Create the files of the iteration folder with the iteration.py and code for that.
+6.Then create the test case file for the iteaion.py.
+7.and also train_iteration.py create and then open that.
+8.
