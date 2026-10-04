@@ -1,719 +1,587 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AlphaGo Zero Arena | DeepMind Go AI</title>
-    <!-- Modern Typography -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <script>window.ALPHAGO_API_URL = "https://alphago-zero.onrender.com";</script>
-</head>
-<body>
-    <div class="app-container">
-        <!-- Top Navigation -->
-        <header class="navbar">
-            <div class="brand">
-                <div class="brand-logo">
-                    <span class="yin"></span>
-                    <span class="yang"></span>
-                </div>
-                <div class="brand-text">
-                    <h1>AlphaGo <span>Zero</span></h1>
-                    <span class="subtitle">Reinforcement Learning Arena</span>
-                </div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b0d12" />
+    <title>AlphaGo Zero Arena</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="engine-overlay" id="engine-overlay" aria-live="polite">
+      <div class="wake-card">
+        <div class="stone-loader"><i></i><i></i><i></i></div>
+        <p class="eyebrow">ALPHAGO ZERO ARENA</p>
+        <h1>Waking the engine<span class="ellipsis">...</span></h1>
+        <p id="wake-message">Connecting to the Render inference service.</p>
+        <div class="wake-progress"><span id="wake-progress"></span></div>
+        <button class="button button-quiet" id="wake-retry" type="button">
+          Retry now
+        </button>
+      </div>
+    </div>
+    <header class="topbar">
+      <a class="brand" href="#play" aria-label="AlphaGo Zero Arena home"
+        ><span class="brand-mark"><span></span><span></span><span></span></span
+        ><span><b>AlphaGo</b> Zero <small>ARENA / 2017</small></span></a
+      >
+      <nav class="tabs" aria-label="Primary navigation">
+        <button class="tab active" data-tab="play" type="button">Play</button
+        ><button class="tab" data-tab="selfplay" type="button">Self-Play</button
+        ><button class="tab" data-tab="evaluation" type="button">
+          Evaluation</button
+        ><button class="tab" data-tab="paper" type="button">Paper</button>
+      </nav>
+      <div class="engine-status" id="engine-status">
+        <span></span><label>Waking engine</label>
+      </div>
+    </header>
+    <main>
+      <section class="tab-panel active" id="panel-play" data-panel="play">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">HUMAN VS POLICY NETWORK</p>
+            <h1>Find the move<br /><em>beneath the move.</em></h1>
+          </div>
+          <div class="heading-note">
+            <span class="live-dot"></span
+            ><span id="mode-note">MCTS inference ready</span
+            ><small>Free Render instance may sleep between games.</small>
+          </div>
+        </div>
+        <div class="play-layout">
+          <aside class="panel controls-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">OPPONENT</p>
+                <h2>Policy setup</h2>
+              </div>
+              <span class="panel-index">01</span>
             </div>
-
-            <div class="header-status">
-                <div class="status-indicator">
-                    <span class="pulse-dot active" id="server-status-dot"></span>
-                    <span id="server-status-text">Engine Ready</span>
-                </div>
-                <div class="turn-badge" id="current-turn-badge">
-                    <span class="stone-preview black"></span>
-                    <span class="turn-text">Black's Turn</span>
-                </div>
+            <label class="field-label" for="model-select">Checkpoint</label
+            ><select class="select" id="model-select">
+              <option>Loading checkpoints...</option>
+            </select>
+            <div class="field-row">
+              <label class="field-label" for="sims-range"
+                >MCTS simulations <output id="sims-value">50</output></label
+              ><span class="mono">per move</span>
             </div>
-
-            <div class="header-actions">
-                <button class="btn btn-opponent" id="btn-open-opponent">
-                    <span class="icon">⚔️</span> Play vs Opponent
-                </button>
-                <button class="btn btn-selfplay" id="btn-open-selfplay">
-                    <span class="sp-pulse"></span>
-                    <span class="icon">🎮</span> Self-Play Training
-                </button>
-                <button class="btn btn-secondary" id="btn-open-eval" title="Model Benchmark & Win Rate Dashboard">
-                    <span class="icon">📊</span> Evaluation Arena
-                </button>
+            <input
+              class="range"
+              id="sims-range"
+              type="range"
+              min="5"
+              max="500"
+              step="5"
+              value="50"
+            />
+            <div class="range-labels">
+              <span>Fast</span><span>Deliberate</span>
             </div>
-        </header>
-
-        <!-- Main Workspace -->
-        <main class="main-layout">
-            <!-- Left Panel: Configuration & AI Analytics -->
-            <aside class="sidebar sidebar-left">
-                <!-- AI Opponent Level Card -->
-                <div class="card level-card">
-                    <div class="card-header">
-                        <span class="card-tag">Opponent</span>
-                        <h3>AI Difficulty Level</h3>
-                    </div>
-
-                    <!-- Iteration Picker (Dynamic: loads all model_iteration_N.pt) -->
-                    <div class="iteration-picker">
-                        <div class="iter-header">
-                            <span class="iter-label">Training Iteration</span>
-                            <span class="iter-badge" id="iter-badge">Iteration 1</span>
-                        </div>
-
-                        <!-- Slider -->
-                        <div class="iter-slider-row">
-                            <span class="iter-edge-label">1</span>
-                            <input type="range" id="iter-slider" class="iter-slider" min="1" max="100" step="1" value="1">
-                            <span class="iter-edge-label" id="iter-max-label">100</span>
-                        </div>
-
-                        <!-- Dropdown fallback / exact pick -->
-                        <div class="form-group" style="margin-top:10px;">
-                            <label for="iter-select" style="font-size:0.8rem;color:var(--text-muted);">Select exact iteration:</label>
-                            <select id="iter-select" class="form-select">
-                                <option value="">Loading iterations…</option>
-                            </select>
-                        </div>
-
-                        <!-- Simulations -->
-                        <div class="form-group" style="margin-top:10px;">
-                            <label for="iter-sims" style="font-size:0.8rem;color:var(--text-muted);">MCTS Simulations: <strong id="iter-sims-val">50</strong></label>
-                            <input type="range" id="iter-sims" class="range-slider" min="5" max="500" step="5" value="50">
-                        </div>
-                    </div>
-
-                    <!-- Active Iteration Banner -->
-                    <div class="active-level-banner" id="active-level-banner" style="margin-top:12px;">
-                        <div class="active-banner-icon">🎯</div>
-                        <div class="active-banner-details">
-                            <span class="banner-title">Playing vs: <strong id="active-level-title">Iteration 1</strong></span>
-                            <span class="banner-sub" id="active-level-sub">Checkpoint: <code>model_iteration_1.pt</code> (50 Sims)</span>
-                        </div>
-                    </div>
-
-                    <!-- Hidden legacy compat (used by app.js) -->
-                    <select id="select-model-file" style="display:none;"></select>
-                    <input type="range" id="input-simulations" style="display:none;" min="5" max="500" value="50">
-                    <span id="sims-val" style="display:none;">50</span>
-                    <button id="toggle-custom-config" style="display:none;"></button>
-                    <div id="custom-config-body" style="display:none;"></div>
-
+            <div class="segmented" role="group" aria-label="Board size">
+              <button class="seg active" data-board="12" type="button">
+                12 x 12</button
+              ><button class="seg" data-board="5" type="button">5 x 5</button>
+            </div>
+            <div class="segmented" role="group" aria-label="Player colour">
+              <button class="seg active" data-color="1" type="button">
+                <i class="stone-dot black"></i> Black</button
+              ><button class="seg" data-color="-1" type="button">
+                <i class="stone-dot white"></i> White
+              </button>
+            </div>
+            <button
+              class="button button-primary full"
+              id="new-game"
+              type="button"
+            >
+              <span>Start new game</span><b>Enter</b>
+            </button>
+            <div class="selection-summary">
+              <span>ACTIVE CHECKPOINT</span
+              ><strong id="active-model">Waiting for engine</strong
+              ><small id="active-config">-- simulations / move</small>
+            </div>
+            <div class="panel-footnote">
+              <span class="jade-mark"></span
+              ><span>Weights load on demand from the live backend.</span>
+            </div>
+          </aside>
+          <section class="board-column">
+            <div class="board-meta">
+              <span class="turn-chip" id="turn-chip"
+                ><i class="stone-dot black"></i> Black to move</span
+              ><span class="mono" id="game-clock">GAME 001 / MOVE 00</span>
+            </div>
+            <div class="board-frame">
+              <div class="board-shell" id="board-shell">
+                <svg
+                  id="goban"
+                  viewBox="0 0 720 720"
+                  role="img"
+                  aria-label="Go board"
+                ></svg>
+                <div class="board-thinking hidden" id="board-thinking">
+                  <div class="ring"></div>
+                  <strong>Searching</strong><span id="think-time">0.0s</span
+                  ><button id="cancel-thinking" type="button">
+                    Stop waiting
+                  </button>
                 </div>
-
-                <!-- Match Settings Card -->
-                <div class="card game-setup-card">
-                    <div class="card-header">
-                        <span class="card-tag">Setup</span>
-                        <h3>Game Settings</h3>
-                    </div>
-
-                    <div class="settings-row">
-                        <label>Play As:</label>
-                        <div class="color-toggle-group">
-                            <button class="color-btn active" data-color="1" id="btn-color-black">
-                                <span class="stone-icon black"></span> Black (Plays 1st)
-                            </button>
-                            <button class="color-btn" data-color="-1" id="btn-color-white">
-                                <span class="stone-icon white"></span> White (Plays 2nd)
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="settings-row">
-                        <label>Board Dimension:</label>
-                        <div class="board-size-group">
-                            <button class="size-btn active" data-size="12">12 × 12 (Standard)</button>
-                            <button class="size-btn" data-size="5">5 × 5 (Mini / Fast)</button>
-                        </div>
-                    </div>
-
-                    <button class="btn btn-primary btn-block" id="btn-new-game">
-                        <span class="icon">▶</span> Start New Game
-                    </button>
+              </div>
+            </div>
+            <div class="board-caption">
+              <span><b id="board-size-label">12 x 12</b> kaya board</span
+              ><span class="mono">A B C D E F G H J K L M</span>
+            </div>
+            <div class="board-actions">
+              <button
+                class="button button-quiet"
+                data-action="pass"
+                type="button"
+              >
+                Pass <kbd>P</kbd></button
+              ><button
+                class="button button-quiet"
+                data-action="undo"
+                type="button"
+              >
+                Undo <kbd>U</kbd></button
+              ><button
+                class="button button-quiet"
+                data-action="hint"
+                type="button"
+              >
+                Hint <kbd>H</kbd></button
+              ><button
+                class="button button-primary"
+                data-action="ai"
+                type="button"
+              >
+                AI play <span>-&gt;</span>
+              </button>
+            </div>
+          </section>
+          <aside class="right-stack">
+            <section class="panel score-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">LIVE VALUE HEAD</p>
+                  <h2>Position balance</h2>
                 </div>
-
-                <!-- Live Evaluation Gauge -->
-                <div class="card eval-card">
-                    <div class="card-header">
-                        <span class="card-tag">Neural Value Head</span>
-                        <h3>Live Win Probability</h3>
-                    </div>
-                    
-                    <div class="eval-meter-container">
-                        <div class="eval-labels">
-                            <span class="label-black">Black: <strong id="eval-black-pct">50.0%</strong></span>
-                            <span class="label-white">White: <strong id="eval-white-pct">50.0%</strong></span>
-                        </div>
-                        <div class="eval-bar-track">
-                            <div class="eval-bar-fill" id="eval-bar-fill" style="width: 50%;"></div>
-                        </div>
-                        <div class="eval-status-note" id="eval-status-note">Even position</div>
-                    </div>
-
-                    <!-- Territory and Captures -->
-                    <div class="score-grid">
-                        <div class="score-card black-score">
-                            <div class="stone-avatar black"></div>
-                            <div class="score-details">
-                                <div class="player-title" id="black-player-name">Human (Black)</div>
-                                <div class="score-val" id="black-score-val">0 pts</div>
-                                <div class="stone-count" id="black-stone-count">Stones: 0</div>
-                            </div>
-                        </div>
-                        <div class="score-card white-score">
-                            <div class="stone-avatar white"></div>
-                            <div class="score-details">
-                                <div class="player-title" id="white-player-name">AI Level 3 (White)</div>
-                                <div class="score-val" id="white-score-val">0 pts</div>
-                                <div class="stone-count" id="white-stone-count">Stones: 0</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-
-            <!-- Center Goban Board Canvas -->
-            <section class="board-viewport">
-                <!-- AI Thinking Pulse Overlay -->
-                <div class="ai-thinking-overlay hidden" id="ai-thinking-overlay">
-                    <div class="spinner-ring"></div>
-                    <div class="thinking-text">
-                        <span>AlphaGo Zero is searching with MCTS...</span>
-                        <small id="thinking-subtext">Exploring tree nodes with PUCT</small>
-                    </div>
-                </div>
-
-                <!-- Goban Container -->
-                <div class="goban-wrapper">
-                    <div class="goban-board" id="goban-board">
-                        <!-- Dynamic Grid Lines and Intersections rendered here -->
-                    </div>
-                </div>
-
-                <!-- Bottom Gameplay Controls -->
-                <div class="gameplay-toolbar">
-                    <button class="tool-btn" id="btn-hint" title="Ask AI for best move recommendation">
-                        <span class="btn-icon">💡</span> Hint
-                    </button>
-                    <button class="tool-btn" id="btn-pass" title="Pass your turn">
-                        <span class="btn-icon">⏭️</span> Pass
-                    </button>
-                    <button class="tool-btn" id="btn-undo" title="Take back last move">
-                        <span class="btn-icon">↩️</span> Undo
-                    </button>
-                    <button class="tool-btn" id="btn-auto-ai" title="Let AI play next move">
-                        <span class="btn-icon">🤖</span> AI Play
-                    </button>
-                    <button class="tool-btn danger" id="btn-resign" title="Resign this match">
-                        <span class="btn-icon">🏳️</span> Resign
-                    </button>
-                </div>
-
-                <!-- Hint Tooltip Banner -->
-                <div class="hint-banner hidden" id="hint-banner">
-                    <div class="hint-content">
-                        <span class="hint-icon">💡</span>
-                        <span id="hint-text">Calculating best move...</span>
-                    </div>
-                    <button class="hint-close" id="btn-close-hint">×</button>
-                </div>
+                <span class="value-readout" id="value-readout">50.0%</span>
+              </div>
+              <div class="value-bar"><span id="value-fill"></span></div>
+              <div class="value-legend">
+                <span
+                  ><i class="dot black"></i>Black
+                  <b id="black-prob">50.0%</b></span
+                ><span
+                  ><i class="dot white"></i>White
+                  <b id="white-prob">50.0%</b></span
+                >
+              </div>
+              <div class="chart-wrap">
+                <canvas id="value-chart" height="74"></canvas>
+              </div>
             </section>
-
-            <!-- Right Panel: Move History & Telemetry -->
-            <aside class="sidebar sidebar-right">
-                <div class="card history-card">
-                    <div class="card-header">
-                        <span class="card-tag">Record</span>
-                        <h3>Move History</h3>
-                        <span class="move-counter" id="move-count-badge">0 Moves</span>
-                    </div>
-
-                    <div class="move-history-list" id="move-history-list">
-                        <div class="empty-history">Game started. Waiting for first move...</div>
-                    </div>
+            <section class="panel history-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">MATCH RECORD</p>
+                  <h2>Moves</h2>
                 </div>
-
-                <div class="card ai-metrics-card">
-                    <div class="card-header">
-                        <span class="card-tag">AlphaGo Insights</span>
-                        <h3>Engine Telemetry</h3>
-                    </div>
-
-                    <div class="metrics-list">
-                        <div class="metric-item">
-                            <span class="metric-label">Selected Level:</span>
-                            <span class="metric-val highlight" id="telemetry-level">Level 3 (Expert)</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-label">MCTS Simulations:</span>
-                            <span class="metric-val" id="telemetry-sims">100 / move</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-label">Last Move Search Time:</span>
-                            <span class="metric-val" id="telemetry-time">0.00s</span>
-                        </div>
-                        <div class="metric-item">
-                            <span class="metric-label">Consecutive Passes:</span>
-                            <span class="metric-val" id="telemetry-passes">0 / 2</span>
-                        </div>
-                    </div>
+                <span class="count-badge" id="move-count">0</span>
+              </div>
+              <div class="move-list" id="move-list">
+                <div class="skeleton-line"></div>
+                <div class="skeleton-line short"></div>
+              </div>
+            </section>
+            <section class="panel telemetry-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">ENGINE TELEMETRY</p>
+                  <h2>Search state</h2>
                 </div>
-            </aside>
-        </main>
-
-        <!-- Self-Play Monitor Modal -->
-        <div class="modal-backdrop hidden" id="selfplay-modal">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-header">
-                    <div class="sp-modal-title">
-                        <span class="sp-live-dot" id="sp-live-dot"></span>
-                        <h2>🎮 Self-Play Training Monitor</h2>
-                    </div>
-                    <button class="modal-close" id="btn-close-selfplay">×</button>
+                <span class="telemetry-pulse"></span>
+              </div>
+              <dl class="telemetry-list">
+                <div>
+                  <dt>Model</dt>
+                  <dd id="telemetry-model">--</dd>
                 </div>
-                <div class="modal-body">
-
-                    <!-- Top stat cards -->
-                    <div class="sp-stats-row">
-                        <div class="sp-stat-card">
-                            <div class="sp-stat-num" id="sp-stat-iteration">—</div>
-                            <div class="sp-stat-lbl">Current Iteration</div>
-                        </div>
-                        <div class="sp-stat-card">
-                            <div class="sp-stat-num" id="sp-stat-games">—</div>
-                            <div class="sp-stat-lbl">Games Played</div>
-                        </div>
-                        <div class="sp-stat-card">
-                            <div class="sp-stat-num" id="sp-stat-examples">—</div>
-                            <div class="sp-stat-lbl">Training Examples</div>
-                        </div>
-                        <div class="sp-stat-card">
-                            <div class="sp-stat-num" id="sp-stat-models">—</div>
-                            <div class="sp-stat-lbl">Models Trained</div>
-                        </div>
-                    </div>
-
-                    <!-- Interactive Self-Play Controls Card -->
-                    <div class="sp-interactive-card">
-                        <div class="sp-card-header">
-                            <h3>⚡ Interactive Live Self-Play Match</h3>
-                            <span class="sp-subtitle">Configure AI vs AI or Model Self-Play with custom MCTS simulations & temperature</span>
-                        </div>
-
-                        <!-- Presets bar -->
-                        <div class="sp-presets-bar">
-                            <span class="sp-presets-label">Quick Presets:</span>
-                            <button class="sp-preset-btn" id="btn-sp-preset-duel">⚔️ Model Duel (Iter 1 vs Iter 100)</button>
-                            <button class="sp-preset-btn" id="btn-sp-preset-self">🔄 Self-Play Training (T=1.0)</button>
-                            <button class="sp-preset-btn" id="btn-sp-preset-fast">⚡ Fast 5x5 Mini Match</button>
-                        </div>
-
-                        <!-- Configuration Grid for Black and White AI -->
-                        <div class="sp-config-grid">
-                            <!-- Black AI Player Config -->
-                            <div class="sp-player-box black-box">
-                                <div class="sp-player-title">
-                                    <span class="stone-icon black"></span>
-                                    <strong>Black AI</strong>
-                                </div>
-                                <div class="form-group">
-                                    <label for="sp-model-black">Model Checkpoint:</label>
-                                    <select id="sp-model-black" class="form-select"></select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="sp-sims-black">MCTS Sims / Move: <strong id="sp-sims-black-val">25</strong></label>
-                                    <input type="range" id="sp-sims-black" min="5" max="500" step="5" value="25" class="range-slider">
-                                </div>
-                                <div class="form-group">
-                                    <label for="sp-temp-black">Temperature (T): <strong id="sp-temp-black-val">1.0</strong></label>
-                                    <input type="range" id="sp-temp-black" min="0" max="2" step="0.1" value="1.0" class="range-slider">
-                                </div>
-                            </div>
-
-                            <div class="sp-vs-divider">VS</div>
-
-                            <!-- White AI Player Config -->
-                            <div class="sp-player-box white-box">
-                                <div class="sp-player-title">
-                                    <span class="stone-icon white"></span>
-                                    <strong>White AI</strong>
-                                </div>
-                                <div class="form-group">
-                                    <label for="sp-model-white">Model Checkpoint:</label>
-                                    <select id="sp-model-white" class="form-select"></select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="sp-sims-white">MCTS Sims / Move: <strong id="sp-sims-white-val">25</strong></label>
-                                    <input type="range" id="sp-sims-white" min="5" max="500" step="5" value="25" class="range-slider">
-                                </div>
-                                <div class="form-group">
-                                    <label for="sp-temp-white">Temperature (T): <strong id="sp-temp-white-val">1.0</strong></label>
-                                    <input type="range" id="sp-temp-white" min="0" max="2" step="0.1" value="1.0" class="range-slider">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Match Parameters (Board size, Temp Threshold, Speed) -->
-                        <div class="sp-params-row">
-                            <div class="form-group">
-                                <label for="sp-board-size">Board Size:</label>
-                                <select id="sp-board-size" class="form-select">
-                                    <option value="12">12 × 12 Standard</option>
-                                    <option value="5">5 × 5 Mini</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="sp-temp-threshold">Temp Threshold (Moves):</label>
-                                <input type="number" id="sp-temp-threshold" value="30" min="0" max="100" class="form-input">
-                            </div>
-                            <div class="form-group">
-                                <label for="sp-play-speed">Play Speed:</label>
-                                <select id="sp-play-speed" class="form-select">
-                                    <option value="300">Fast (300ms)</option>
-                                    <option value="800" selected>Normal (800ms)</option>
-                                    <option value="1500">Slow (1.5s)</option>
-                                    <option value="0">Step-by-Step (Manual)</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Action Toolbar -->
-                        <div class="sp-action-toolbar">
-                            <button class="btn btn-primary" id="btn-sp-start">
-                                <span class="icon">▶</span> Start Self-Play
-                            </button>
-                            <button class="btn btn-secondary hidden" id="btn-sp-pause">
-                                <span class="icon">⏸</span> Pause
-                            </button>
-                            <button class="btn btn-secondary hidden" id="btn-sp-step">
-                                <span class="icon">⏭</span> Step 1 Move
-                            </button>
-                            <button class="btn btn-secondary danger hidden" id="btn-sp-stop">
-                                <span class="icon">⏹</span> Stop Match
-                            </button>
-                            <button class="btn btn-secondary" id="btn-sp-save-data">
-                                <span class="icon">💾</span> Save Dataset
-                            </button>
-                        </div>
-                    </div>
-
-
-                    <!-- Phase pipeline -->
-                    <div class="sp-pipeline" id="sp-pipeline">
-                        <div class="sp-phase" id="sp-phase-selfplay">
-                            <div class="sp-phase-icon">🎮</div>
-                            <div class="sp-phase-label">Self-Play</div>
-                            <div class="sp-phase-status">Idle</div>
-                        </div>
-                        <div class="sp-phase-arrow">→</div>
-                        <div class="sp-phase" id="sp-phase-train">
-                            <div class="sp-phase-icon">🧠</div>
-                            <div class="sp-phase-label">Training</div>
-                            <div class="sp-phase-status">Idle</div>
-                        </div>
-                        <div class="sp-phase-arrow">→</div>
-                        <div class="sp-phase" id="sp-phase-eval">
-                            <div class="sp-phase-icon">⚔️</div>
-                            <div class="sp-phase-label">Evaluation</div>
-                            <div class="sp-phase-status">Idle</div>
-                        </div>
-                        <div class="sp-phase-arrow">→</div>
-                        <div class="sp-phase" id="sp-phase-promote">
-                            <div class="sp-phase-icon">✅</div>
-                            <div class="sp-phase-label">Promote</div>
-                            <div class="sp-phase-status">Idle</div>
-                        </div>
-                    </div>
-
-                    <!-- Progress bar -->
-                    <div class="sp-progress-row">
-                        <span class="sp-progress-label" id="sp-progress-label">Waiting for training to start...</span>
-                        <div class="progress-bar-container" style="flex:1; margin-left:12px;">
-                            <div class="progress-bar-fill" id="sp-progress-fill" style="width:0%"></div>
-                        </div>
-                    </div>
-
-                    <!-- Models available grid -->
-                    <div class="sp-models-section">
-                        <h4 class="sp-section-title">Trained Model Checkpoints</h4>
-                        <div class="sp-models-grid" id="sp-models-grid">
-                            <span class="sp-no-models">Loading...</span>
-                        </div>
-                    </div>
-
-                    <!-- Live log -->
-                    <div class="sp-log-section">
-                        <h4 class="sp-section-title">Live Training Log</h4>
-                        <div class="train-log-terminal" id="sp-log-terminal" style="height:160px;">
-[Monitor] Waiting for self-play data...
-                        </div>
-                    </div>
-
-                    <!-- Hidden compat elements -->
-                    <input type="number" id="input-train-iterations" style="display:none" value="1">
-                    <button id="btn-start-training" style="display:none"></button>
-                    <span class="badge" id="train-status-badge" style="display:none">Idle</span>
-                    <div class="progress-bar-fill" id="train-progress-fill" style="display:none"></div>
-                    <div id="train-log-terminal" style="display:none"></div>
-
+                <div>
+                  <dt>Simulations</dt>
+                  <dd id="telemetry-sims">--</dd>
                 </div>
-                <div class="modal-footer">
-                    <span style="font-size: 0.8rem; color: var(--text-muted); margin-right: auto;">💡 Click anywhere outside or press ESC to exit</span>
-                    <button class="btn btn-secondary btn-modal-close">
-                        <span class="icon">✖</span> Close Window
-                    </button>
+                <div>
+                  <dt>Last search</dt>
+                  <dd id="telemetry-time">--</dd>
                 </div>
-            </div>
+                <div>
+                  <dt>Passes</dt>
+                  <dd id="telemetry-passes">0 / 2</dd>
+                </div>
+              </dl>
+            </section>
+          </aside>
         </div>
-
-        <!-- Game Over Modal -->
-        <div class="modal-backdrop hidden" id="gameover-modal">
-            <div class="modal-dialog gameover-dialog">
-                <div class="gameover-banner" id="gameover-banner">
-                    <div class="trophy-icon" id="gameover-icon">🏆</div>
-                    <h2 id="gameover-title">Game Over</h2>
-                    <p id="gameover-subtitle">Victory by Territory Score</p>
-                </div>
-                <div class="modal-body">
-                    <div class="final-score-summary">
-                        <div class="final-score-box">
-                            <span class="stone-icon black"></span>
-                            <span class="player-name">Black</span>
-                            <span class="score-number" id="final-black-score">0</span>
-                        </div>
-                        <div class="vs-divider">VS</div>
-                        <div class="final-score-box">
-                            <span class="stone-icon white"></span>
-                            <span class="player-name">White</span>
-                            <span class="score-number" id="final-white-score">0</span>
-                        </div>
-                    </div>
-                    <div class="modal-actions">
-                        <button class="btn btn-primary btn-block" id="btn-modal-newgame">Play Again</button>
-        <!-- Evaluation & Win-Rate Benchmark Modal -->
-        <div class="modal-backdrop hidden" id="eval-modal">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-header">
-                    <h2>📊 AlphaGo Zero Model Evaluation & Win-Rate Dashboard</h2>
-                    <button class="modal-close" id="btn-close-eval">×</button>
-                </div>
-                <div class="modal-body">
-                    <p class="modal-intro">
-                        Experimentally test whether training improves playing strength! Compare any two model checkpoints or simulation budgets over 20+ automated games alternating Black and White.
-                    </p>
-
-                    <div class="eval-setup-grid">
-                        <div class="eval-model-box">
-                            <h4>Model A (Player 1)</h4>
-                            <div class="form-group">
-                                <label for="eval-select-model-a">Checkpoint File:</label>
-                                <select id="eval-select-model-a" class="form-select"></select>
-                            </div>
-                            <div class="form-group">
-                                <label for="eval-sims-a">MCTS Simulations / move:</label>
-                                <input type="number" id="eval-sims-a" value="25" min="5" max="500" class="form-input">
-                            </div>
-                        </div>
-
-                        <div class="eval-vs-badge">VS</div>
-
-                        <div class="eval-model-box">
-                            <h4>Model B (Player 2)</h4>
-                            <div class="form-group">
-                                <label for="eval-select-model-b">Checkpoint File:</label>
-                                <select id="eval-select-model-b" class="form-select"></select>
-                            </div>
-                            <div class="form-group">
-                                <label for="eval-sims-b">MCTS Simulations / move:</label>
-                                <input type="number" id="eval-sims-b" value="100" min="5" max="500" class="form-input">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="eval-match-settings">
-                        <div class="form-group">
-                            <label for="eval-num-games">Tournament Games:</label>
-                            <input type="number" id="eval-num-games" value="20" min="2" max="100" class="form-input">
-                        </div>
-                        <button class="btn btn-primary" id="btn-start-eval">
-                            <span class="icon">⚔️</span> Run Benchmark Tournament
-                        </button>
-                    </div>
-
-                    <div class="eval-dashboard-container">
-                        <div class="status-header">
-                            <h4>Tournament Results & Performance Telemetry</h4>
-                            <span class="badge" id="eval-status-badge">Idle</span>
-                        </div>
-                        <div class="eval-results-grid">
-                            <div class="metric-card">
-                                <div class="metric-num" id="eval-rate-a">0%</div>
-                                <div class="metric-lbl" id="eval-name-a">Model A Win Rate</div>
-                            </div>
-                            <div class="metric-card">
-                                <div class="metric-num" id="eval-rate-b">0%</div>
-                                <div class="metric-lbl" id="eval-name-b">Model B Win Rate</div>
-                            </div>
-                            <div class="metric-card">
-                                <div class="metric-num" id="eval-draws-count">0</div>
-                                <div class="metric-lbl">Draws</div>
-                            </div>
-                            <div class="metric-card">
-                                <div class="metric-num" id="eval-avg-dur">0.0s</div>
-                                <div class="metric-lbl">Avg Game Duration</div>
-                            </div>
-                        </div>
-
-                        <div class="train-log-terminal" id="eval-log-terminal">
-                            [System] Ready to run evaluation tournament. Select model checkpoints and click Run Benchmark Tournament.
-                        </div>
-                    </div>
-
-                    <!-- Head-to-Head Pairwise Statistics Card -->
-                    <div class="eval-dashboard-container" style="margin-top: 20px;">
-                        <div class="status-header">
-                            <h4>⚔️ Pairwise Head-to-Head Match Record</h4>
-                            <span class="badge" id="h2h-match-count-badge" style="background: rgba(56, 139, 253, 0.2); color: #58a6ff;">0 Games Played</span>
-                        </div>
-                        <div class="h2h-summary-card" id="h2h-summary-card" style="padding: 16px; background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid var(--border-color);">
-                            <div class="h2h-teams-row" style="display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 1rem; margin-bottom: 10px;">
-                                <span id="h2h-model-a-lbl" style="color: #388bfd;">Model A</span>
-                                <span style="font-size: 0.85rem; color: var(--text-muted);" id="h2h-score-summary">0 - 0</span>
-                                <span id="h2h-model-b-lbl" style="color: #a371f7;">Model B</span>
-                            </div>
-                            <div class="h2h-progress-bar" style="height: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; display: flex;">
-                                <div id="h2h-bar-a" style="width: 50%; background: linear-gradient(90deg, #2563eb, #388bfd); transition: width 0.4s ease;"></div>
-                                <div id="h2h-bar-b" style="width: 50%; background: linear-gradient(90deg, #a371f7, #7c3aed); transition: width 0.4s ease;"></div>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;">
-                                <span id="h2h-wins-a">0 Wins (0%)</span>
-                                <span id="h2h-draws-label">0 Draws</span>
-                                <span id="h2h-wins-b">0 Wins (0%)</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- All Models Tournament Leaderboard ("Games Played Against All") -->
-                    <div class="eval-dashboard-container" style="margin-top: 20px;">
-                        <div class="status-header">
-                            <h4>🏆 Model Performance Leaderboard (Total Games vs All Opponents)</h4>
-                            <span class="badge" style="background: rgba(57, 211, 83, 0.2); color: #39d353;">AlphaGo Zero Standings</span>
-                        </div>
-                        <div class="table-responsive" style="overflow-x: auto; max-height: 280px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 12px;">
-                            <table class="leaderboard-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem;">
-                                <thead>
-                                    <tr style="background: rgba(255,255,255,0.05); border-bottom: 1px solid var(--border-color); color: var(--text-muted);">
-                                        <th style="padding: 10px 14px;">Rank</th>
-                                        <th style="padding: 10px 14px;">Model Checkpoint</th>
-                                        <th style="padding: 10px 14px;">Iteration</th>
-                                        <th style="padding: 10px 14px; text-align: center;">Total Games (vs All)</th>
-                                        <th style="padding: 10px 14px; text-align: center;">W - L - D</th>
-                                        <th style="padding: 10px 14px; text-align: center;">Win Rate</th>
-                                        <th style="padding: 10px 14px; text-align: center;">Rating</th>
-                                        <th style="padding: 10px 14px; text-align: center;">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="leaderboard-table-body">
-                                    <tr>
-                                        <td colspan="8" style="padding: 16px; text-align: center; color: var(--text-muted);">Loading evaluation standings...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <span style="font-size: 0.8rem; color: var(--text-muted); margin-right: auto;">💡 Click anywhere outside or press ESC to exit</span>
-                    <button class="btn btn-secondary btn-modal-close">
-                        <span class="icon">✖</span> Close Window
-                    </button>
-                </div>
+        <div class="bottom-grid">
+          <section class="panel player-card black-card">
+            <div class="large-stone black"></div>
+            <div>
+              <p class="eyebrow">BLACK / HUMAN</p>
+              <h3 id="black-name">You</h3>
+              <span id="black-score">0 points / 0 stones</span>
             </div>
-        </div>
-        <!-- Play vs Opponent Modal -->
-        <div class="modal-backdrop hidden" id="opponent-modal">
-            <div class="modal-dialog modal-md">
-                <div class="modal-header">
-                    <h2>⚔️ Choose AI Opponent Stage & Match Options</h2>
-                    <button class="modal-close" id="btn-close-opponent">×</button>
-                </div>
-                <div class="modal-body">
-                    <p class="modal-intro">
-                        Select the trained model iteration (checkpoint stage) and playing difficulty to challenge AlphaGo Zero!
-                    </p>
-
-                    <!-- Iteration & Checkpoint Stage Selector -->
-                    <div class="form-group" style="margin-bottom: 18px;">
-                        <label style="font-weight: 600; color: var(--text-main); font-size: 0.95rem; display: flex; justify-content: space-between; align-items: center;">
-                            <span>Trained Checkpoint Stage:</span>
-                            <span class="iter-badge" id="opp-modal-iter-badge" style="background: rgba(56, 139, 253, 0.2); color: #58a6ff; padding: 2px 10px; border-radius: 12px; font-size: 0.82rem;">Iteration 1</span>
-                        </label>
-                        <div class="iter-slider-row" style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
-                            <span style="font-size: 0.8rem; color: var(--text-muted);">Iter 1</span>
-                            <input type="range" id="opp-modal-iter-slider" class="iter-slider" min="1" max="100" step="1" value="1" style="flex: 1;">
-                            <span style="font-size: 0.8rem; color: var(--text-muted);" id="opp-modal-iter-max">Iter 100</span>
-                        </div>
-                        <div style="margin-top: 10px;">
-                            <select id="opp-modal-iter-select" class="form-select" style="width: 100%; background: rgba(0,0,0,0.3); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px;">
-                                <option value="">Loading trained iterations...</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- MCTS Simulations (Difficulty) -->
-                    <div class="form-group" style="margin-bottom: 18px;">
-                        <label style="font-weight: 600; color: var(--text-main); font-size: 0.95rem; display: flex; justify-content: space-between;">
-                            <span>AI Search Depth (MCTS Simulations):</span>
-                            <strong id="opp-modal-sims-val" style="color: #39d353;">50 sims / move</strong>
-                        </label>
-                        <input type="range" id="opp-modal-sims-slider" class="range-slider" min="5" max="500" step="5" value="50" style="width: 100%; margin-top: 8px;">
-                    </div>
-
-                    <!-- Match Settings: Color & Dimension -->
-                    <div class="eval-setup-grid" style="grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
-                        <div class="form-group">
-                            <label style="font-weight: 600; font-size: 0.88rem;">Play As (Color):</label>
-                            <div class="color-toggle-group" style="margin-top: 8px; display: flex; gap: 8px;">
-                                <button class="color-btn active" data-color="1" id="opp-modal-color-black" style="flex:1;">
-                                    <span class="stone-icon black"></span> Black
-                                </button>
-                                <button class="color-btn" data-color="-1" id="opp-modal-color-white" style="flex:1;">
-                                    <span class="stone-icon white"></span> White
-                                </button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label style="font-weight: 600; font-size: 0.88rem;">Board Dimension:</label>
-                            <div class="board-size-group" style="margin-top: 8px; display: flex; gap: 8px;">
-                                <button class="size-btn active" data-size="12" id="opp-modal-size-12" style="flex:1;">12 × 12</button>
-                                <button class="size-btn" data-size="5" id="opp-modal-size-5" style="flex:1;">5 × 5</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <button class="btn btn-primary btn-block" id="btn-opp-modal-start" style="padding: 12px; font-size: 1.05rem; font-weight: 700; background: linear-gradient(135deg, #2563eb, #7c3aed);">
-                        ⚔️ Start Match vs Opponent
-                    </button>
-                </div>
-                <div class="modal-footer">
-                    <span style="font-size: 0.8rem; color: var(--text-muted); margin-right: auto;">💡 Click anywhere outside or press ESC to exit</span>
-                    <button class="btn btn-secondary btn-modal-close">
-                        <span class="icon">✖</span> Close Window
-                    </button>
-                </div>
+            <strong>YOUR SIDE</strong>
+          </section>
+          <section class="panel player-card white-card">
+            <div class="large-stone white"></div>
+            <div>
+              <p class="eyebrow">WHITE / AI</p>
+              <h3 id="white-name">AlphaGo Zero</h3>
+              <span id="white-score">0 points / 0 stones</span>
             </div>
+            <strong>POLICY NETWORK</strong>
+          </section>
+          <section class="panel insight-card">
+            <p class="eyebrow">SEARCH NOTE</p>
+            <p id="hint-copy">
+              The value head will describe the position after the first move.
+            </p>
+            <button class="text-button" id="show-thinking" type="button" hidden>
+              Show top visits <span>-&gt;</span>
+            </button>
+          </section>
         </div>
-
-    <!-- Application Script -->
-    <script src="app.js"></script>
-</body>
+      </section>
+      <section class="tab-panel" id="panel-selfplay" data-panel="selfplay">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">AUTONOMOUS TRAINING LOOP</p>
+            <h1>Watch the policy<br /><em>teach itself.</em></h1>
+          </div>
+          <div class="heading-note">
+            <span class="live-dot amber"></span
+            ><span>Telemetry from /api/selfplay_status</span
+            ><small>Every value comes from the running engine.</small>
+          </div>
+        </div>
+        <div class="feature-grid">
+          <section class="panel selfplay-config">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">SELF-PLAY CONFIGURATION</p>
+                <h2>Two policies, one board</h2>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label
+                >Black model<select
+                  class="select"
+                  id="sp-model-black"
+                ></select></label
+              ><label
+                >White model<select
+                  class="select"
+                  id="sp-model-white"
+                ></select></label
+              ><label
+                >Black sims<input
+                  class="input"
+                  id="sp-sims-black"
+                  type="number"
+                  value="25"
+                  min="1" /></label
+              ><label
+                >White sims<input
+                  class="input"
+                  id="sp-sims-white"
+                  type="number"
+                  value="25"
+                  min="1" /></label
+              ><label
+                >Temperature<input
+                  class="input"
+                  id="sp-temp-black"
+                  type="number"
+                  value="1"
+                  step="0.1" /></label
+              ><label
+                >Threshold<input
+                  class="input"
+                  id="sp-temp-threshold"
+                  type="number"
+                  value="30"
+                  min="1"
+              /></label>
+            </div>
+            <div class="inline-actions">
+              <button class="button button-primary" id="sp-start" type="button">
+                Start self-play</button
+              ><button class="button button-quiet" id="sp-step" type="button">
+                Step once</button
+              ><button class="button button-quiet" id="sp-save" type="button">
+                Save data
+              </button>
+              <button class="button button-quiet" id="sp-train" type="button">
+                Train one iteration
+              </button>
+            </div>
+          </section>
+          <section class="panel pipeline-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">PIPELINE</p>
+                <h2>From board to weights</h2>
+              </div>
+            </div>
+            <div class="pipeline">
+              <div class="pipeline-step active">
+                <b>01</b><span>Self-play</span>
+              </div>
+              <div class="pipeline-step"><b>02</b><span>Training</span></div>
+              <div class="pipeline-step"><b>03</b><span>Evaluation</span></div>
+              <div class="pipeline-step"><b>04</b><span>Promote</span></div>
+            </div>
+            <div class="stat-grid">
+              <div>
+                <small>Iteration</small><strong id="sp-iteration">--</strong>
+              </div>
+              <div><small>Games</small><strong id="sp-games">--</strong></div>
+              <div>
+                <small>Examples</small><strong id="sp-examples">--</strong>
+              </div>
+              <div><small>Models</small><strong id="sp-models">--</strong></div>
+            </div>
+          </section>
+        </div>
+        <div class="feature-grid">
+          <section class="panel log-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">LIVE LOG</p>
+                <h2>Engine output</h2>
+              </div>
+              <span class="status-badge" id="sp-status">Idle</span>
+            </div>
+            <pre id="sp-log">Waiting for self-play telemetry...</pre>
+          </section>
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">CHECKPOINT TIMELINE</p>
+                <h2>Available weights</h2>
+              </div>
+            </div>
+            <div class="checkpoint-grid" id="checkpoint-grid">
+              <p class="muted">Loading reported checkpoints...</p>
+            </div>
+          </section>
+        </div>
+      </section>
+      <section class="tab-panel" id="panel-evaluation" data-panel="evaluation">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">MODEL BENCHMARK</p>
+            <h1>Measure the<br /><em>next generation.</em></h1>
+          </div>
+          <div class="heading-note">
+            <span class="live-dot jade"></span
+            ><span>Promotion threshold 55%</span
+            ><small>Models and outcomes are reported by the backend.</small>
+          </div>
+        </div>
+        <section class="panel eval-config">
+          <div class="form-grid eval-fields">
+            <label
+              >Model A<select class="select" id="eval-model-a"></select></label
+            ><label
+              >Model B<select class="select" id="eval-model-b"></select></label
+            ><label
+              >Games<input
+                class="input"
+                id="eval-games"
+                type="number"
+                value="10"
+                min="1" /></label
+            ><label
+              >Board<select class="select" id="eval-board">
+                <option value="12">12 x 12</option>
+                <option value="5">5 x 5</option>
+              </select></label
+            >
+          </div>
+          <button class="button button-primary" id="eval-start" type="button">
+            Run evaluation <span>-&gt;</span>
+          </button>
+        </section>
+        <div class="eval-grid">
+          <section class="panel h2h-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">HEAD TO HEAD</p>
+                <h2 id="h2h-title">Awaiting a benchmark</h2>
+              </div>
+              <span class="status-badge" id="eval-status">Ready</span>
+            </div>
+            <div class="versus">
+              <div>
+                <strong id="rate-a">--</strong><span id="name-a">Model A</span>
+              </div>
+              <div class="versus-mark">VS</div>
+              <div>
+                <strong id="rate-b">--</strong><span id="name-b">Model B</span>
+              </div>
+            </div>
+            <div class="match-bar">
+              <span id="match-a"></span><span id="match-b"></span>
+            </div>
+            <div class="h2h-footer">
+              <span id="draws">0 draws</span
+              ><b id="promotion-badge">Not evaluated</b>
+            </div>
+          </section>
+          <section class="panel leaderboard-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">RANKED CHECKPOINTS</p>
+                <h2>Leaderboard</h2>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Model</th>
+                    <th>W-L-D</th>
+                    <th>Win rate</th>
+                    <th>Elo</th>
+                  </tr>
+                </thead>
+                <tbody id="leaderboard">
+                  <tr>
+                    <td colspan="5" class="muted">
+                      Loading reported results...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+      <section class="tab-panel paper-panel" id="panel-paper">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">THE RESEARCH NOTE</p>
+            <h1>Scaled-down<br /><em>AlphaGo Zero.</em></h1>
+          </div>
+          <div class="heading-note">
+            <span class="live-dot amber"></span><span>Silver et al., 2017</span
+            ><small>Faithful loop, compact experiment.</small>
+          </div>
+        </div>
+        <section class="paper-loop panel">
+          <div class="loop-node">
+            <span>01</span><b>Self-play</b
+            ><small>Generate positions and visit policies</small>
+          </div>
+          <i>-&gt;</i>
+          <div class="loop-node">
+            <span>02</span><b>Train</b
+            ><small>Policy and value heads learn together</small>
+          </div>
+          <i>-&gt;</i>
+          <div class="loop-node">
+            <span>03</span><b>Evaluate</b
+            ><small>Candidate plays the current best</small>
+          </div>
+          <i>-&gt;</i>
+          <div class="loop-node">
+            <span>04</span><b>Promote</b
+            ><small>Keep the stronger checkpoint</small>
+          </div>
+        </section>
+        <section class="panel paper-table">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">HONEST COMPARISON</p>
+              <h2>Paper vs this implementation</h2>
+            </div>
+          </div>
+          <div class="comparison">
+            <div>
+              <span>Board</span><b>19 x 19</b><strong>12 x 12 or 5 x 5</strong>
+            </div>
+            <div>
+              <span>Network</span><b>20 or 40 residual blocks</b
+              ><strong>Compact CNN</strong>
+            </div>
+            <div>
+              <span>Search</span><b>1,600 simulations / move</b
+              ><strong>Configurable MCTS</strong>
+            </div>
+            <div>
+              <span>Training</span><b>Millions of positions</b
+              ><strong>Local checkpoints</strong>
+            </div>
+          </div>
+          <p class="paper-note">
+            This is a scaled-down replication for experimentation and education.
+            It preserves the self-play, neural evaluation, search, and promotion
+            ideas without claiming the scale or strength of the original system.
+          </p>
+        </section>
+      </section>
+    </main>
+    <div class="toast-stack" id="toasts" aria-live="polite"></div>
+    <dialog class="dialog" id="game-dialog">
+      <div class="dialog-inner">
+        <button
+          class="dialog-close"
+          data-close-dialog
+          type="button"
+          aria-label="Close"
+        >
+          x
+        </button>
+        <p class="eyebrow">GAME COMPLETE</p>
+        <h2 id="dialog-title">Game over</h2>
+        <p id="dialog-copy"></p>
+        <div class="dialog-score">
+          <span>Black <b id="dialog-black">0</b></span
+          ><span>White <b id="dialog-white">0</b></span>
+        </div>
+        <button
+          class="button button-primary full"
+          id="dialog-new-game"
+          type="button"
+        >
+          Play again
+        </button>
+      </div>
+    </dialog>
+    +
+    <script>
+      const API_BASE = location.hostname.endsWith("vercel.app")
+        ? "https://alphago-zero.onrender.com"
+        : "";
+    </script>
+    +
+    <script type="module" src="app.js"></script>
+    +
+  </body>
+  +
 </html>

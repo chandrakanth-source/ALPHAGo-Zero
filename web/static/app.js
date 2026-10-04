@@ -1,1678 +1,847 @@
-/**
- * AlphaGo Zero Arena - Frontend Controller
- * Manages Goban rendering, stone placement, AI level switching,
- * MCTS hint requests, audio synthesis, and training loops.
- */
+const API_BASE = location.hostname.endsWith("vercel.app")
+  ? "https://alphago-zero.onrender.com"
+  : "";
 
-// ---------------------------------------------------------------------------
-// Audio Synthesizer (Realistic Go Stone "Clack")
-// ---------------------------------------------------------------------------
-
-class SoundEngine {
-  constructor() {
-    this.ctx = null;
-  }
-
-  init() {
-    if (!this.ctx) {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AudioContext();
-    }
-  }
-
-  playStoneClick() {
-    try {
-      this.init();
-      if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-
-      // Transient click (wood collision)
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      const filter = this.ctx.createBiquadFilter();
-
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(320 + Math.random() * 80, now);
-      osc.frequency.exponentialRampToValueAtTime(60, now + 0.08);
-
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(1400, now);
-
-      gain.gain.setValueAtTime(0.45, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
-
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(now);
-      osc.stop(now + 0.09);
-    } catch (e) {
-      // Audio policy might block until user gesture
-    }
-  }
-}
-
-const soundEngine = new SoundEngine();
-
-// ---------------------------------------------------------------------------
-// App State
-// ---------------------------------------------------------------------------
-
+const MOCK = new URLSearchParams(location.search).get("mock") === "1";
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
 const state = {
   boardSize: 12,
-  humanColor: 1, // 1 = Black, -1 = White
-  selectedLevel: "custom",
+  humanColor: 1,
   simulations: 50,
-  selectedModelFile: "", // used by legacy paths
-  iterationModelFile: "model_iteration_1.pt", // active iteration .pt filename
-  selectedIteration: 1,
-  boardState: Array(12)
-    .fill(0)
-    .map(() => Array(12).fill(0)),
+  modelFile: "",
+  iterations: [],
+  board: [],
   legalMoves: [],
+  currentPlayer: 1,
   lastAiMove: null,
-  currentHint: null,
-  isAiThinking: false,
+  moveHistory: [],
   gameOver: false,
-  levelsData: null,
-  iterationsData: [], // [{iteration, filename, size_kb}, ...]
+  thinking: false,
+  valueHistory: [50],
+  moveNumber: 0,
+  mock: MOCK,
+  mockSelfplay: null,
 };
+let boardCells = new Map();
+let valueChart = null;
+let thinkTimer = null;
+let wakeAttempt = 0;
+let selfplayPoll = null;
+let evaluationPoll = null;
 
-// ---------------------------------------------------------------------------
-// DOM Elements
-// ---------------------------------------------------------------------------
-
-const gobanEl = document.getElementById("goban-board");
-const aiThinkingOverlay = document.getElementById("ai-thinking-overlay");
-const serverStatusDot = document.getElementById("server-status-dot");
-const serverStatusText = document.getElementById("server-status-text");
-const currentTurnBadge = document.getElementById("current-turn-badge");
-
-// Level & Settings (legacy hidden elements for compat)
-const toggleCustomBtn = document.getElementById("toggle-custom-config");
-const customConfigBody = document.getElementById("custom-config-body");
-const selectModelFile = document.getElementById("select-model-file");
-const inputSimulations = document.getElementById("input-simulations");
-const simsValLabel = document.getElementById("sims-val");
-const colorBtns = document.querySelectorAll(".color-btn");
-const sizeBtns = document.querySelectorAll(".size-btn");
-const btnNewGame = document.getElementById("btn-new-game");
-
-// Iteration Picker
-const iterSlider = document.getElementById("iter-slider");
-const iterSelect = document.getElementById("iter-select");
-const iterBadge = document.getElementById("iter-badge");
-const iterMaxLabel = document.getElementById("iter-max-label");
-const iterSimsInput = document.getElementById("iter-sims");
-const iterSimsVal = document.getElementById("iter-sims-val");
-
-// Live Eval & Scores
-const evalBarFill = document.getElementById("eval-bar-fill");
-const evalBlackPct = document.getElementById("eval-black-pct");
-const evalWhitePct = document.getElementById("eval-white-pct");
-const evalStatusNote = document.getElementById("eval-status-note");
-const blackScoreVal = document.getElementById("black-score-val");
-const whiteScoreVal = document.getElementById("white-score-val");
-const blackStoneCount = document.getElementById("black-stone-count");
-const whiteStoneCount = document.getElementById("white-stone-count");
-const blackPlayerName = document.getElementById("black-player-name");
-const whitePlayerName = document.getElementById("white-player-name");
-
-// Toolbar Controls
-const btnHint = document.getElementById("btn-hint");
-const btnPass = document.getElementById("btn-pass");
-const btnUndo = document.getElementById("btn-undo");
-const btnAutoAi = document.getElementById("btn-auto-ai");
-const btnResign = document.getElementById("btn-resign");
-const hintBanner = document.getElementById("hint-banner");
-const hintText = document.getElementById("hint-text");
-const btnCloseHint = document.getElementById("btn-close-hint");
-
-// History & Telemetry
-const moveHistoryList = document.getElementById("move-history-list");
-const moveCountBadge = document.getElementById("move-count-badge");
-const telemetryLevel = document.getElementById("telemetry-level");
-const telemetrySims = document.getElementById("telemetry-sims");
-const telemetryTime = document.getElementById("telemetry-time");
-const telemetryPasses = document.getElementById("telemetry-passes");
-
-// Modals
-const trainingModal = document.getElementById("training-modal");
-const infoModal = document.getElementById("info-modal");
-const gameoverModal = document.getElementById("gameover-modal");
-const evalModal = document.getElementById("eval-modal");
-const selfplayModal = document.getElementById("selfplay-modal");
-const btnOpenTraining = document.getElementById("btn-open-training");
-const btnCloseTraining = document.getElementById("btn-close-training");
-const btnOpenInfo = document.getElementById("btn-open-info");
-const btnCloseInfo = document.getElementById("btn-close-info");
-const btnOpenEval = document.getElementById("btn-open-eval");
-const btnCloseEval = document.getElementById("btn-close-eval");
-const btnOpenSelfplay = document.getElementById("btn-open-selfplay");
-const btnCloseSelfplay = document.getElementById("btn-close-selfplay");
-const btnStartTraining = document.getElementById("btn-start-training");
-const inputTrainIterations = document.getElementById("input-train-iterations");
-const trainStatusBadge = document.getElementById("train-status-badge");
-const trainProgressFill = document.getElementById("train-progress-fill");
-const trainLogTerminal = document.getElementById("train-log-terminal");
-const btnModalNewGame = document.getElementById("btn-modal-newgame");
-
-// Evaluation Modal Controls
-const evalSelectModelA = document.getElementById("eval-select-model-a");
-const evalSelectModelB = document.getElementById("eval-select-model-b");
-const evalSimsA = document.getElementById("eval-sims-a");
-const evalSimsB = document.getElementById("eval-sims-b");
-const evalNumGames = document.getElementById("eval-num-games");
-const btnStartEval = document.getElementById("btn-start-eval");
-const evalStatusBadge = document.getElementById("eval-status-badge");
-const evalRateA = document.getElementById("eval-rate-a");
-const evalRateB = document.getElementById("eval-rate-b");
-const evalNameA = document.getElementById("eval-name-a");
-const evalNameB = document.getElementById("eval-name-b");
-const evalDrawsCount = document.getElementById("eval-draws-count");
-const evalAvgDur = document.getElementById("eval-avg-dur");
-const evalLogTerminal = document.getElementById("eval-log-terminal");
-
-// Play vs Opponent Modal
-const opponentModal = document.getElementById("opponent-modal");
-const btnOpenOpponent = document.getElementById("btn-open-opponent");
-const btnCloseOpponent = document.getElementById("btn-close-opponent");
-const oppModalIterSlider = document.getElementById("opp-modal-iter-slider");
-const oppModalIterSelect = document.getElementById("opp-modal-iter-select");
-const oppModalIterBadge = document.getElementById("opp-modal-iter-badge");
-const oppModalIterMax = document.getElementById("opp-modal-iter-max");
-const oppModalSimsSlider = document.getElementById("opp-modal-sims-slider");
-const oppModalSimsVal = document.getElementById("opp-modal-sims-val");
-const oppModalColorBlack = document.getElementById("opp-modal-color-black");
-const oppModalColorWhite = document.getElementById("opp-modal-color-white");
-const oppModalSize12 = document.getElementById("opp-modal-size-12");
-const oppModalSize5 = document.getElementById("opp-modal-size-5");
-const btnOppModalStart = document.getElementById("btn-opp-modal-start");
-
-// ---------------------------------------------------------------------------
-// API Client
-// ---------------------------------------------------------------------------
-
-const API_BASE_URL = (window.ALPHAGO_API_URL || "").replace(/\/$/, "");
-
-async function apiRequest(endpoint, method = "GET", data = null) {
-  try {
-    const options = {
-      method,
-      headers: { "Content-Type": "application/json" },
+function mockIterations() {
+  return [0, 1, 2, 3, 5, 10, 20].map((iteration) => ({
+    iteration,
+    filename: `model_iteration_${iteration}.pt`,
+    size_kb: 3020,
+  }));
+}
+function mockGame() {
+  const board = Array.from({ length: state.boardSize }, () =>
+    Array(state.boardSize).fill(0),
+  );
+  return {
+    active: true,
+    board_size: state.boardSize,
+    board,
+    current_player: 1,
+    human_color: state.humanColor,
+    consecutive_passes: 0,
+    game_over: false,
+    winner: null,
+    black_score: 0,
+    white_score: 0,
+    black_stones: 0,
+    white_stones: 0,
+    legal_moves: [],
+    move_history: [],
+    last_ai_move: null,
+    ai_win_prob_black: 0.5,
+    active_level_name: state.modelFile || "Untrained",
+    active_model_file: state.modelFile || "untrained",
+    active_simulations: state.simulations,
+    latest_ai_info: null,
+  };
+}
+async function mockRequest(endpoint, method, data) {
+  if (endpoint.startsWith("/api/iterations"))
+    return { iterations: mockIterations(), count: 7 };
+  if (endpoint.startsWith("/api/levels"))
+    return {
+      current_board_size: state.boardSize,
+      presets: {},
+      available_checkpoints: mockIterations().map((item) => ({
+        filename: item.filename,
+        detected_board_size: state.boardSize,
+        compatible_with_current: true,
+      })),
     };
-    if (data) options.body = JSON.stringify(data);
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, options);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      const detailStr = String(err.detail || "API request failed");
-      const error = new Error(detailStr);
-      if (
-        detailStr.includes("No active game session") ||
-        detailStr.includes("Call /api/new_game first")
-      ) {
-        error.isNoSession = true;
-      }
-      throw error;
-    }
-    return await res.json();
-  } catch (e) {
-    console.error(`Error during API ${endpoint}:`, e);
-    throw e;
+  if (endpoint === "/api/new_game") {
+    Object.assign(state, {
+      boardSize: data.board_size,
+      humanColor: data.human_color,
+      simulations: data.simulations,
+      modelFile: data.model_file || "untrained",
+      moveHistory: [],
+      moveNumber: 0,
+      lastAiMove: null,
+    });
+    return mockGame();
   }
-}
-
-// ---------------------------------------------------------------------------
-// Initialization
-// ---------------------------------------------------------------------------
-
-async function init() {
-  renderGoban();
-  setupEventListeners();
-  setupSelfPlayEventListeners();
-
-  try {
-    await fetchLevels();
-  } catch (e) {
-    console.warn("fetchLevels failed:", e);
-  }
-
-  try {
-    await fetchIterations();
-  } catch (e) {
-    console.warn("fetchIterations failed:", e);
-  }
-
-  try {
-    await fetchEvaluationStats();
-  } catch (e) {
-    console.warn("fetchEvaluationStats failed:", e);
-  }
-
-  try {
-    await startNewGame();
-  } catch (e) {
-    console.warn("startNewGame failed:", e);
-  }
-}
-
-async function fetchLevels() {
-  try {
-    const data = await apiRequest(`/api/levels?board_size=${state.boardSize}`);
-    state.levelsData = data;
-
-    // Populate eval modal model selects
-    if (evalSelectModelA && evalSelectModelB) {
-      evalSelectModelA.innerHTML =
-        '<option value="untrained">Novice (Untrained / Tabula Rasa)</option>';
-      evalSelectModelB.innerHTML =
-        '<option value="untrained">Novice (Untrained / Tabula Rasa)</option>';
-    }
-    if (data.available_checkpoints) {
-      data.available_checkpoints.forEach((cp) => {
-        if (evalSelectModelA && evalSelectModelB) {
-          const compatStr = cp.detected_board_size
-            ? ` (${cp.detected_board_size}x${cp.detected_board_size})`
-            : "";
-          const optA = document.createElement("option");
-          optA.value = cp.filename;
-          optA.textContent = `${cp.filename}${compatStr}`;
-          evalSelectModelA.appendChild(optA);
-
-          const optB = document.createElement("option");
-          optB.value = cp.filename;
-          optB.textContent = `${cp.filename}${compatStr}`;
-          evalSelectModelB.appendChild(optB);
-        }
-      });
-      if (
-        evalSelectModelA &&
-        data.available_checkpoints.find(
-          (c) => c.filename === "model_iteration_1.pt",
-        )
-      ) {
-        evalSelectModelA.value = "model_iteration_1.pt";
-      }
-      if (
-        evalSelectModelB &&
-        data.available_checkpoints.find((c) => c.filename === "latest_model.pt")
-      ) {
-        evalSelectModelB.value = "latest_model.pt";
-      }
-    }
-    updateActiveLevelUI();
-  } catch (e) {
-    serverStatusDot.classList.remove("active");
-    serverStatusText.textContent = "Engine Offline";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Iteration Picker Logic
-// ---------------------------------------------------------------------------
-
-async function fetchIterations() {
-  try {
-    const data = await apiRequest("/api/iterations");
-    state.iterationsData = data.iterations || [];
-
-    populateSelfPlayModels();
-
-    if (state.iterationsData.length === 0) return;
-
-    // Configure slider range
-    const minIter = state.iterationsData[0].iteration;
-    const maxIter =
-      state.iterationsData[state.iterationsData.length - 1].iteration;
-    iterSlider.min = minIter;
-    iterSlider.max = maxIter;
-    iterSlider.value = minIter;
-    if (iterMaxLabel) iterMaxLabel.textContent = maxIter;
-
-    // Populate dropdown
-    if (iterSelect) {
-      iterSelect.innerHTML = "";
-      state.iterationsData.forEach((it) => {
-        const opt = document.createElement("option");
-        opt.value = it.filename;
-        opt.textContent = `Iteration ${it.iteration}  (${it.size_kb} KB)`;
-        opt.dataset.iteration = it.iteration;
-        iterSelect.appendChild(opt);
-      });
-    }
-
-    // Set default to iteration 1
-    applyIteration(minIter);
-  } catch (e) {
-    console.warn("Could not load iterations:", e);
-  }
-}
-
-function applyIteration(iterNum) {
-  const entry = state.iterationsData.find((it) => it.iteration === iterNum);
-  if (!entry) return;
-
-  state.selectedIteration = iterNum;
-  state.iterationModelFile = entry.filename;
-  state.selectedLevel = "custom";
-
-  // Sync slider
-  if (iterSlider) iterSlider.value = iterNum;
-  // Sync dropdown
-  if (iterSelect) iterSelect.value = entry.filename;
-  // Badge
-  if (iterBadge) iterBadge.textContent = `Iteration ${iterNum}`;
-
-  updateActiveLevelUI();
-  syncOpponentModalUI();
-}
-
-// ---------------------------------------------------------------------------
-// Game Loop & Goban Rendering
-// ---------------------------------------------------------------------------
-
-async function startNewGame() {
-  hideModals();
-  state.currentHint = null;
-  hintBanner.classList.add("hidden");
-  setAiThinking(true);
-
-  try {
-    const payload = {
-      board_size: state.boardSize,
-      human_color: state.humanColor,
-      level: state.selectedLevel,
-      simulations: state.simulations,
-      model_file: state.iterationModelFile || state.selectedModelFile || null,
-    };
-
-    const res = await apiRequest("/api/new_game", "POST", payload);
-    updateGameState(res);
-    renderGoban();
-  } catch (e) {
-    alert(`Failed to start game: ${e.message}`);
-  } finally {
-    setAiThinking(false);
-  }
-}
-
-function updateGameState(data) {
-  if (!data.active) return;
-
-  state.boardSize = data.board_size;
-  state.boardState = data.board;
-  state.legalMoves = data.legal_moves || [];
-  state.lastAiMove = data.last_ai_move;
-  state.gameOver = data.game_over;
-
-  // Current turn indicator
-  const isBlackTurn = data.current_player === 1;
-  const isHumanTurn = data.current_player === state.humanColor;
-
-  currentTurnBadge.innerHTML = `
-        <span class="stone-preview ${isBlackTurn ? "black" : "white"}"></span>
-        <span class="turn-text">${isBlackTurn ? "Black's Turn" : "White's Turn"} ${isHumanTurn ? "(You)" : "(AI)"}</span>
-    `;
-
-  // Names in player cards
-  if (state.humanColor === 1) {
-    blackPlayerName.textContent = "Human (You)";
-    whitePlayerName.textContent = `AlphaGo (${capitalize(state.selectedLevel)})`;
-  } else {
-    blackPlayerName.textContent = `AlphaGo (${capitalize(state.selectedLevel)})`;
-    whitePlayerName.textContent = "Human (You)";
-  }
-
-  // Live Scores & Stones
-  blackScoreVal.textContent = `${data.black_score} pts`;
-  whiteScoreVal.textContent = `${data.white_score} pts`;
-  blackStoneCount.textContent = `Stones: ${data.black_stones}`;
-  whiteStoneCount.textContent = `Stones: ${data.white_stones}`;
-
-  // Win rate evaluation
-  const blackWinPct = (data.ai_win_prob_black * 100).toFixed(1);
-  const whiteWinPct = (100 - parseFloat(blackWinPct)).toFixed(1);
-  evalBarFill.style.width = `${blackWinPct}%`;
-  evalBlackPct.textContent = `${blackWinPct}%`;
-  evalWhitePct.textContent = `${whiteWinPct}%`;
-
-  if (blackWinPct > 65) {
-    evalStatusNote.textContent = "Black has strategic advantage";
-  } else if (blackWinPct < 35) {
-    evalStatusNote.textContent = "White has strategic advantage";
-  } else {
-    evalStatusNote.textContent = "Even tactical position";
-  }
-
-  // Telemetry
-  const activeLevelText =
-    data.active_level_name || `Level: ${capitalize(state.selectedLevel)}`;
-  const activeModelFile = data.active_model_file
-    ? ` [${data.active_model_file}]`
-    : "";
-  telemetryLevel.textContent = `${activeLevelText}${activeModelFile}`;
-  telemetrySims.textContent = `${data.active_simulations || state.simulations} / move`;
-  telemetryPasses.textContent = `${data.consecutive_passes} / 2`;
-  if (data.latest_ai_info && data.latest_ai_info.time) {
-    telemetryTime.textContent = `${data.latest_ai_info.time}s`;
-  }
-
-  updateActiveLevelUI(data);
-
-  // Move History
-  renderMoveHistory(data.move_history);
-
-  // Game Over check
-  if (data.game_over) {
-    showGameOverModal(data);
-  }
-
-  renderGoban();
-}
-
-function renderGoban() {
-  const size = state.boardSize;
-  gobanEl.innerHTML = "";
-
-  const width = gobanEl.clientWidth || 580;
-  const padding = 36;
-  const cellSize = (width - padding * 2) / (size - 1);
-
-  // 1. Draw SVG Grid Lines
-  const svgNS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("class", "grid-svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${width}`);
-
-  for (let i = 0; i < size; i++) {
-    const pos = padding + i * cellSize;
-
-    // Horizontal line
-    const hLine = document.createElementNS(svgNS, "line");
-    hLine.setAttribute("x1", padding);
-    hLine.setAttribute("y1", pos);
-    hLine.setAttribute("x2", width - padding);
-    hLine.setAttribute("y2", pos);
-    hLine.setAttribute("stroke", "#42240c");
-    hLine.setAttribute("stroke-width", "1.5");
-    svg.appendChild(hLine);
-
-    // Vertical line
-    const vLine = document.createElementNS(svgNS, "line");
-    vLine.setAttribute("x1", pos);
-    vLine.setAttribute("y1", padding);
-    vLine.setAttribute("x2", pos);
-    vLine.setAttribute("y2", width - padding);
-    vLine.setAttribute("stroke", "#42240c");
-    vLine.setAttribute("stroke-width", "1.5");
-    svg.appendChild(vLine);
-  }
-
-  // 2. Draw Star Points (Hoshi)
-  const starPoints = getStarPoints(size);
-  starPoints.forEach(([r, c]) => {
-    const cx = padding + c * cellSize;
-    const cy = padding + r * cellSize;
-    const circle = document.createElementNS(svgNS, "circle");
-    circle.setAttribute("cx", cx);
-    circle.setAttribute("cy", cy);
-    circle.setAttribute("r", "4");
-    circle.setAttribute("fill", "#2a1403");
-    svg.appendChild(circle);
-  });
-
-  gobanEl.appendChild(svg);
-
-  // 3. Render Coordinate Headers (A-L, 1-12)
-  for (let i = 0; i < size; i++) {
-    const colLetter = String.fromCharCode(65 + i);
-    const colX = padding + i * cellSize;
-
-    // Top & Bottom Col labels
-    const topLabel = document.createElement("span");
-    topLabel.className = "coord-label";
-    topLabel.style.left = `${colX}px`;
-    topLabel.style.top = "12px";
-    topLabel.textContent = colLetter;
-    gobanEl.appendChild(topLabel);
-
-    const botLabel = document.createElement("span");
-    botLabel.className = "coord-label";
-    botLabel.style.left = `${colX}px`;
-    botLabel.style.bottom = "12px";
-    botLabel.textContent = colLetter;
-    gobanEl.appendChild(botLabel);
-
-    // Row Numbers (1 at bottom or 1 at top)
-    const rowNum = (i + 1).toString();
-    const rowY = padding + i * cellSize;
-
-    const leftLabel = document.createElement("span");
-    leftLabel.className = "coord-label";
-    leftLabel.style.left = "14px";
-    leftLabel.style.top = `${rowY - 6}px`;
-    leftLabel.textContent = rowNum;
-    gobanEl.appendChild(leftLabel);
-
-    const rightLabel = document.createElement("span");
-    rightLabel.className = "coord-label";
-    rightLabel.style.right = "14px";
-    rightLabel.style.top = `${rowY - 6}px`;
-    rightLabel.textContent = rowNum;
-    gobanEl.appendChild(rightLabel);
-  }
-
-  // 4. Render Intersections & Stones
-  const stoneRadius = cellSize * 0.44;
-
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      const x = padding + c * cellSize;
-      const y = padding + r * cellSize;
-      const val = state.boardState[r] ? state.boardState[r][c] : 0;
-
-      if (val === 0) {
-        // Empty Intersection for Clicking
-        const inter = document.createElement("div");
-        inter.className = `intersection hover-${state.humanColor === 1 ? "black" : "white"}`;
-        inter.style.left = `${x}px`;
-        inter.style.top = `${y}px`;
-        inter.style.width = `${cellSize}px`;
-        inter.style.height = `${cellSize}px`;
-
-        inter.addEventListener("click", () => handleHumanMove(r, c));
-        gobanEl.appendChild(inter);
-      } else {
-        // Stone Placed
-        const stone = document.createElement("div");
-        stone.className = `stone ${val === 1 ? "black" : "white"}`;
-        stone.style.left = `${x}px`;
-        stone.style.top = `${y}px`;
-        stone.style.width = `${stoneRadius * 2}px`;
-        stone.style.height = `${stoneRadius * 2}px`;
-
-        // Highlight last move
-        if (
-          state.lastAiMove &&
-          state.lastAiMove[0] === r &&
-          state.lastAiMove[1] === c
-        ) {
-          stone.classList.add("last-move");
-        }
-
-        gobanEl.appendChild(stone);
-      }
-
-      // Hint highlight
-      if (
-        state.currentHint &&
-        state.currentHint[0] === r &&
-        state.currentHint[1] === c
-      ) {
-        const hintEl = document.createElement("div");
-        hintEl.className = "hint-glow";
-        hintEl.style.left = `${x}px`;
-        hintEl.style.top = `${y}px`;
-        hintEl.style.width = `${stoneRadius * 2.2}px`;
-        hintEl.style.height = `${stoneRadius * 2.2}px`;
-        gobanEl.appendChild(hintEl);
-      }
-    }
-  }
-}
-
-function getStarPoints(size) {
-  if (size === 12) {
-    return [
-      [3, 3],
-      [3, 8],
-      [8, 3],
-      [8, 8],
-    ];
-  } else if (size === 5) {
-    return [[2, 2]];
-  }
-  return [];
-}
-
-// ---------------------------------------------------------------------------
-// Human & AI Interactions
-// ---------------------------------------------------------------------------
-
-async function handleMoveError(e, defaultMsg = "Action failed") {
+  if (endpoint === "/api/state") return mockGame();
   if (
-    e.isNoSession ||
-    (e.message &&
-      (e.message.includes("No active game session") ||
-        e.message.includes("Call /api/new_game")))
-  ) {
-    console.warn(
-      "Backend session missing. Auto-reinitializing new game session...",
+    endpoint === "/api/move" ||
+    endpoint === "/api/ai_move" ||
+    endpoint === "/api/undo"
+  )
+    return mockGame();
+  if (endpoint === "/api/hint")
+    return {
+      coords: [
+        Math.floor(state.boardSize / 2),
+        Math.floor(state.boardSize / 2),
+      ],
+      action: "F6",
+      win_prob: 0.54,
+      explanation: "A central move keeps influence balanced across the board.",
+    };
+  if (endpoint === "/api/selfplay_status")
+    return {
+      current_iteration: 20,
+      games_played: 138,
+      total_examples: 18420,
+      models_trained: 20,
+      is_active: false,
+      progress: "Pipeline ready / idle",
+      log: ["Mock telemetry enabled", "No backend writes performed."],
+      model_files: mockIterations().map((item) => item),
+    };
+  if (endpoint === "/api/selfplay/new_game") {
+    state.mockSelfplay = mockGame();
+    state.mockSelfplay.is_selfplay = true;
+    return state.mockSelfplay;
+  }
+  if (endpoint === "/api/selfplay/step")
+    return state.mockSelfplay || mockGame();
+  if (endpoint === "/api/selfplay/save_data")
+    return { status: "saved", filename: "mock-preview.pt", examples_count: 64 };
+  if (endpoint === "/api/evaluation_stats") return mockEvaluation();
+  if (endpoint === "/api/evaluate") return { status: "started" };
+  if (endpoint === "/api/evaluation_status")
+    return {
+      is_evaluating: false,
+      model_a: "model_iteration_1.pt",
+      model_b: "model_iteration_2.pt",
+      sims_a: 25,
+      sims_b: 50,
+      win_rate_a: 46,
+      win_rate_b: 54,
+      draws: 0,
+      avg_duration: 1.2,
+      log: ["Mock evaluation complete"],
+    };
+  if (endpoint === "/api/train") return { status: "started" };
+  if (endpoint === "/api/train_status")
+    return { is_training: false, progress: "Mock preview", log: [] };
+  return {};
+}
+function mockEvaluation() {
+  const leaderboard = mockIterations().map((item, index) => ({
+    model: item.filename,
+    iteration: item.iteration,
+    total_games: 20,
+    wins: 8 + index,
+    losses: 12 - index,
+    draws: 0,
+    win_rate: 40 + index * 4,
+    rating: 980 + index * 24,
+  }));
+  return {
+    h2h: {
+      model_a: "model_iteration_1.pt",
+      model_b: "model_iteration_2.pt",
+      games_played: 20,
+      model_a_wins: 9,
+      model_b_wins: 11,
+      draws: 0,
+      win_rate_a: 45,
+      win_rate_b: 55,
+    },
+    leaderboard,
+    matrix: {},
+    history: [],
+  };
+}
+async function apiRequest(endpoint, method = "GET", data = null, signal) {
+  if (MOCK) return mockRequest(endpoint, method, data);
+  const options = {
+    method,
+    headers: { "Content-Type": "application/json" },
+    signal,
+  };
+  if (data) options.body = JSON.stringify(data);
+  const response = await fetch(`${API_BASE}${endpoint}`, options);
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ detail: response.statusText }));
+    const error = new Error(String(errorData.detail || "API request failed"));
+    error.isNoSession =
+      error.message.includes("No active game session") ||
+      error.message.includes("Call /api/new_game");
+    throw error;
+  }
+  return response.json();
+}
+function toast(message, kind = "error") {
+  const item = document.createElement("div");
+  item.className = `toast ${kind === "ok" ? "ok" : ""}`;
+  item.textContent = message;
+  $("#toasts").append(item);
+  setTimeout(() => item.remove(), 5000);
+}
+function setEngineStatus(label, online = true) {
+  $("#engine-status label").textContent = label;
+  $("#engine-status").classList.toggle("offline", !online);
+}
+function setWakeProgress(percent, message) {
+  $("#wake-progress").style.width = `${percent}%`;
+  $("#wake-message").textContent = message;
+}
+async function wakeEngine() {
+  if (MOCK) {
+    setWakeProgress(
+      100,
+      "Mock preview is local and never writes to the backend.",
     );
-    await startNewGame();
-  } else {
-    alert(e.message || defaultMsg);
-  }
-}
-
-async function handleHumanMove(row, col) {
-  if (state.isAiThinking || state.gameOver) return;
-
-  soundEngine.playStoneClick();
-  setAiThinking(true);
-  state.currentHint = null;
-  hintBanner.classList.add("hidden");
-
-  try {
-    const res = await apiRequest("/api/move", "POST", {
-      row,
-      col,
-      is_pass: false,
-    });
-    soundEngine.playStoneClick();
-    updateGameState(res);
-  } catch (e) {
-    await handleMoveError(e, "Illegal move");
-  } finally {
-    setAiThinking(false);
-  }
-}
-
-async function handlePass() {
-  if (state.isAiThinking || state.gameOver) return;
-
-  if (!confirm("Are you sure you want to PASS your turn?")) return;
-
-  setAiThinking(true);
-  try {
-    const res = await apiRequest("/api/move", "POST", { is_pass: true });
-    updateGameState(res);
-  } catch (e) {
-    await handleMoveError(e, "Pass failed");
-  } finally {
-    setAiThinking(false);
-  }
-}
-
-async function handleUndo() {
-  if (state.isAiThinking) return;
-
-  try {
-    const res = await apiRequest("/api/undo", "POST");
-    updateGameState(res);
-  } catch (e) {
-    await handleMoveError(e, "Cannot undo move.");
-  }
-}
-
-async function handleAutoAi() {
-  if (state.isAiThinking || state.gameOver) return;
-
-  setAiThinking(true);
-  try {
-    const res = await apiRequest("/api/ai_move", "POST");
-    soundEngine.playStoneClick();
-    updateGameState(res);
-  } catch (e) {
-    await handleMoveError(e, "AI move failed");
-  } finally {
-    setAiThinking(false);
-  }
-}
-
-async function handleHint() {
-  if (state.isAiThinking || state.gameOver) return;
-
-  hintBanner.classList.remove("hidden");
-  hintText.textContent = "AlphaGo MCTS search in progress...";
-
-  try {
-    const hint = await apiRequest("/api/hint", "POST");
-    if (hint.coords) {
-      state.currentHint = hint.coords;
-      hintText.textContent = `${hint.explanation}`;
-      renderGoban();
-    } else {
-      hintText.textContent = `${hint.explanation}`;
-    }
-  } catch (e) {
-    if (e.isNoSession) {
-      await startNewGame();
-    } else {
-      hintText.textContent = "Could not calculate hint.";
-    }
-  }
-}
-
-function handleResign() {
-  if (state.gameOver) return;
-  if (confirm("Are you sure you want to resign the game?")) {
-    showGameOverModal({
-      winner: -state.humanColor,
-      black_score: state.humanColor === 1 ? 0 : 99,
-      white_score: state.humanColor === -1 ? 0 : 99,
-      resignation: true,
-    });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Move History Rendering
-// ---------------------------------------------------------------------------
-
-function renderMoveHistory(history) {
-  if (!history || history.length === 0) {
-    moveHistoryList.innerHTML =
-      '<div class="empty-history">Game started. Waiting for first move...</div>';
-    moveCountBadge.textContent = "0 Moves";
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await boot();
     return;
   }
-
-  moveCountBadge.textContent = `${history.length} Moves`;
-  moveHistoryList.innerHTML = "";
-
-  history.forEach((m, idx) => {
-    const row = document.createElement("div");
-    row.className = `move-row ${m.player === "AI" ? "ai-move" : ""}`;
-
-    const isBlack = m.color === 1;
-    const colorLabel = isBlack ? "B" : "W";
-    const metaStr = m.time ? `${m.time}s` : "";
-
-    row.innerHTML = `
-            <span class="move-num">#${idx + 1}</span>
-            <span class="move-action">[${colorLabel}] ${m.action}</span>
-            <span class="move-meta">${m.player} ${metaStr}</span>
-        `;
-    moveHistoryList.appendChild(row);
-  });
-
-  moveHistoryList.scrollTop = moveHistoryList.scrollHeight;
-}
-
-// ---------------------------------------------------------------------------
-// Modals & Training UI
-// ---------------------------------------------------------------------------
-
-function showGameOverModal(data) {
-  state.gameOver = true;
-  const humanWon = data.winner === state.humanColor;
-  const titleEl = document.getElementById("gameover-title");
-  const subtitleEl = document.getElementById("gameover-subtitle");
-  const iconEl = document.getElementById("gameover-icon");
-
-  if (data.resignation) {
-    titleEl.textContent = humanWon ? "Victory!" : "Resigned";
-    subtitleEl.textContent = humanWon
-      ? "Opponent resigned."
-      : "You resigned the game.";
-    iconEl.textContent = humanWon ? "🏆" : "🏳️";
-  } else if (data.winner === 0) {
-    titleEl.textContent = "Draw Game (Jigo)";
-    subtitleEl.textContent = "Equal territory scores.";
-    iconEl.textContent = "🤝";
-  } else {
-    titleEl.textContent = humanWon ? "Victory!" : "AlphaGo Wins!";
-    subtitleEl.textContent = `Winner: ${data.winner === 1 ? "Black" : "White"}`;
-    iconEl.textContent = humanWon ? "🏆" : "🤖";
-  }
-
-  document.getElementById("final-black-score").textContent = data.black_score;
-  document.getElementById("final-white-score").textContent = data.white_score;
-
-  gameoverModal.classList.remove("hidden");
-}
-
-function hideModals() {
-  trainingModal.classList.add("hidden");
-  infoModal.classList.add("hidden");
-  gameoverModal.classList.add("hidden");
-  if (evalModal) evalModal.classList.add("hidden");
-  if (opponentModal) opponentModal.classList.add("hidden");
-  if (selfplayModal) {
-    selfplayModal.classList.add("hidden");
-    stopSelfplayStatusPolling();
-  }
-}
-
-function syncOpponentModalUI() {
-  if (!opponentModal) return;
-
-  if (state.iterationsData.length > 0) {
-    const minIter = state.iterationsData[0].iteration;
-    const maxIter =
-      state.iterationsData[state.iterationsData.length - 1].iteration;
-    if (oppModalIterSlider) {
-      oppModalIterSlider.min = minIter;
-      oppModalIterSlider.max = maxIter;
-      oppModalIterSlider.value = state.selectedIteration || minIter;
-    }
-    if (oppModalIterMax) oppModalIterMax.textContent = `Iter ${maxIter}`;
-
-    if (oppModalIterSelect) {
-      oppModalIterSelect.innerHTML = "";
-      state.iterationsData.forEach((it) => {
-        const opt = document.createElement("option");
-        opt.value = it.filename;
-        opt.textContent = `Iteration ${it.iteration} (${it.size_kb} KB)`;
-        if (it.iteration === state.selectedIteration) opt.selected = true;
-        oppModalIterSelect.appendChild(opt);
-      });
-    }
-  }
-
-  if (oppModalIterBadge)
-    oppModalIterBadge.textContent = `Iteration ${state.selectedIteration || 1}`;
-  if (oppModalSimsSlider) oppModalSimsSlider.value = state.simulations || 50;
-  if (oppModalSimsVal)
-    oppModalSimsVal.textContent = `${state.simulations || 50} sims / move`;
-
-  if (oppModalColorBlack && oppModalColorWhite) {
-    oppModalColorBlack.classList.toggle("active", state.humanColor === 1);
-    oppModalColorWhite.classList.toggle("active", state.humanColor === -1);
-  }
-
-  if (oppModalSize12 && oppModalSize5) {
-    oppModalSize12.classList.toggle("active", state.boardSize === 12);
-    oppModalSize5.classList.toggle("active", state.boardSize === 5);
-  }
-}
-
-let trainingPollInterval = null;
-let evalPollInterval = null;
-
-async function startTraining() {
-  const iters = parseInt(inputTrainIterations.value) || 1;
-  btnStartTraining.disabled = true;
-  trainStatusBadge.textContent = "Running...";
-  trainStatusBadge.className = "badge badge-gold";
-
+  wakeAttempt += 1;
+  setWakeProgress(
+    Math.min(92, 18 + wakeAttempt * 13),
+    wakeAttempt === 1
+      ? "Connecting to the Render inference service."
+      : `Render is waking up. Retrying in a moment (${wakeAttempt}).`,
+  );
+  setEngineStatus("Waking engine", false);
   try {
-    await apiRequest(`/api/train?iterations=${iters}`, "POST");
-    pollTrainingStatus();
-  } catch (e) {
-    alert(`Training launch failed: ${e.message}`);
-    btnStartTraining.disabled = false;
+    await apiRequest("/api/iterations");
+    setWakeProgress(100, "Engine online. Loading reported checkpoints.");
+    await boot();
+  } catch (error) {
+    const delay = Math.min(15000, 900 * 2 ** Math.min(wakeAttempt - 1, 4));
+    $("#wake-retry").textContent = `Retry in ${Math.ceil(delay / 1000)}s`;
+    setTimeout(wakeEngine, delay);
   }
 }
-
-function pollTrainingStatus() {
-  if (trainingPollInterval) clearInterval(trainingPollInterval);
-
-  trainingPollInterval = setInterval(async () => {
-    try {
-      const status = await apiRequest("/api/train_status");
-      trainProgressFill.style.width = status.is_training ? "65%" : "100%";
-      trainLogTerminal.textContent = status.log.join("\n") || status.progress;
-      trainLogTerminal.scrollTop = trainLogTerminal.scrollHeight;
-
-      if (!status.is_training) {
-        clearInterval(trainingPollInterval);
-        btnStartTraining.disabled = false;
-        trainStatusBadge.textContent = "Finished";
-        trainStatusBadge.className = "badge badge-green";
-        fetchLevels(); // Refresh new models
-      }
-    } catch (e) {
-      clearInterval(trainingPollInterval);
-      btnStartTraining.disabled = false;
-    }
-  }, 2000);
+async function boot() {
+  try {
+    await Promise.all([loadIterations(), loadLevels(), loadEvaluation()]);
+    await startGame();
+    setEngineStatus("Engine online", true);
+    $("#mode-note").textContent = MOCK
+      ? "Mock preview"
+      : "MCTS inference ready";
+    $("#engine-overlay").classList.add("ready");
+  } catch (error) {
+    setEngineStatus("Engine error", false);
+    toast(error.message);
+    $("#wake-retry").textContent = "Retry now";
+  }
 }
-
-async function startEvaluation() {
-  const payload = {
-    model_a_file: evalSelectModelA.value,
-    model_b_file: evalSelectModelB.value,
-    sims_a: parseInt(evalSimsA.value) || 25,
-    sims_b: parseInt(evalSimsB.value) || 100,
-    num_games: parseInt(evalNumGames.value) || 20,
+async function loadIterations() {
+  const data = await apiRequest("/api/iterations");
+  state.iterations = data.iterations || [];
+  const options = state.iterations
+    .map(
+      (item) =>
+        `<option value="${item.filename}">Iteration ${item.iteration} / ${item.size_kb} KB</option>`,
+    )
+    .join("");
+  [
+    $("#model-select"),
+    $("#sp-model-black"),
+    $("#sp-model-white"),
+    $("#eval-model-a"),
+    $("#eval-model-b"),
+  ].forEach((select) => {
+    if (select)
+      select.innerHTML =
+        options || `<option value="">No checkpoints reported</option>`;
+  });
+  if (state.iterations.length) {
+    state.modelFile = state.iterations[0].filename;
+    $("#model-select").value = state.modelFile;
+    $("#eval-model-a").value = state.iterations[0].filename;
+    $("#eval-model-b").value = state.iterations.at(-1).filename;
+  }
+  renderCheckpoints();
+}
+async function loadLevels() {
+  await apiRequest(`/api/levels?board_size=${state.boardSize}`);
+}
+async function loadEvaluation() {
+  try {
+    renderEvaluation(
+      await apiRequest(
+        `/api/evaluation_stats?model_a=${encodeURIComponent($("#eval-model-a")?.value || "")}&model_b=${encodeURIComponent($("#eval-model-b")?.value || "")}`,
+      ),
+    );
+  } catch (error) {
+    console.warn(error);
+  }
+}
+function renderCheckpoints() {
+  $("#checkpoint-grid").innerHTML = state.iterations.length
+    ? state.iterations
+        .map(
+          (item) =>
+            `<div class="checkpoint"><strong>ITER ${item.iteration}</strong><span>${item.filename} / ${item.size_kb} KB</span></div>`,
+        )
+        .join("")
+    : '<p class="muted">No checkpoints reported by the backend.</p>';
+}
+async function startGame() {
+  await requestGame({
     board_size: state.boardSize,
-  };
-
-  btnStartEval.disabled = true;
-  evalStatusBadge.textContent = "Running...";
-  evalStatusBadge.className = "badge badge-gold";
-
+    human_color: state.humanColor,
+    level: "custom",
+    simulations: state.simulations,
+    model_file: state.modelFile || null,
+  });
+}
+async function requestGame(payload) {
+  setThinking(true);
   try {
-    await apiRequest("/api/evaluate", "POST", payload);
-    pollEvaluationStatus();
-  } catch (e) {
-    alert(`Evaluation launch failed: ${e.message}`);
-    btnStartEval.disabled = false;
+    const data = await apiRequest("/api/new_game", "POST", payload);
+    updateGame(data);
+  } catch (error) {
+    toast(`Could not start game: ${error.message}`);
+  } finally {
+    setThinking(false);
   }
 }
-
-function pollEvaluationStatus() {
-  if (evalPollInterval) clearInterval(evalPollInterval);
-
-  evalPollInterval = setInterval(async () => {
-    try {
-      const status = await apiRequest("/api/evaluation_status");
-      evalNameA.textContent = `${status.model_a || "Model A"} (${status.sims_a} Sims)`;
-      evalNameB.textContent = `${status.model_b || "Model B"} (${status.sims_b} Sims)`;
-      evalRateA.textContent = `${status.win_rate_a}%`;
-      evalRateB.textContent = `${status.win_rate_b}%`;
-      evalDrawsCount.textContent = status.draws;
-      evalAvgDur.textContent = `${status.avg_duration}s`;
-
-      evalLogTerminal.textContent = status.log.join("\n") || status.progress;
-      evalLogTerminal.scrollTop = evalLogTerminal.scrollHeight;
-
-      if (!status.is_evaluating) {
-        clearInterval(evalPollInterval);
-        btnStartEval.disabled = false;
-        evalStatusBadge.textContent = "Completed";
-        evalStatusBadge.className = "badge badge-green";
-        fetchEvaluationStats();
-      }
-    } catch (e) {
-      clearInterval(evalPollInterval);
-      btnStartEval.disabled = false;
-    }
-  }, 1500);
+function updateGame(data) {
+  if (!data || data.active === false) return;
+  state.boardSize = data.board_size || state.boardSize;
+  state.board = data.board || [];
+  state.legalMoves = data.legal_moves || [];
+  state.currentPlayer = data.current_player || 1;
+  state.lastAiMove = data.last_ai_move;
+  state.moveHistory = data.move_history || [];
+  state.gameOver = Boolean(data.game_over);
+  state.moveNumber = state.moveHistory.length;
+  state.modelFile = data.active_model_file || state.modelFile;
+  state.valueHistory.push(Number(data.ai_win_prob_black || 0.5) * 100);
+  if (state.valueHistory.length > 24) state.valueHistory.shift();
+  $("#board-size-label").textContent =
+    `${state.boardSize} x ${state.boardSize}`;
+  $("#game-clock").textContent =
+    `GAME 001 / MOVE ${String(state.moveNumber).padStart(2, "0")}`;
+  $("#active-model").textContent = state.modelFile || "Untrained";
+  $("#active-config").textContent =
+    `${data.active_simulations || state.simulations} simulations / move`;
+  $("#telemetry-model").textContent = state.modelFile || "--";
+  $("#telemetry-sims").textContent =
+    `${data.active_simulations || state.simulations} / move`;
+  $("#telemetry-time").textContent = data.latest_ai_info?.time
+    ? `${data.latest_ai_info.time}s`
+    : "--";
+  $("#telemetry-passes").textContent = `${data.consecutive_passes || 0} / 2`;
+  const blackProb = Number(data.ai_win_prob_black ?? 0.5) * 100;
+  $("#value-fill").style.width = `${blackProb}%`;
+  $("#value-readout").textContent = `${blackProb.toFixed(1)}%`;
+  $("#black-prob").textContent = `${blackProb.toFixed(1)}%`;
+  $("#white-prob").textContent = `${(100 - blackProb).toFixed(1)}%`;
+  $("#black-score").textContent =
+    `${data.black_score || 0} points / ${data.black_stones || 0} stones`;
+  $("#white-score").textContent =
+    `${data.white_score || 0} points / ${data.white_stones || 0} stones`;
+  $("#black-name").textContent =
+    state.humanColor === 1 ? "You" : "AlphaGo Zero";
+  $("#white-name").textContent =
+    state.humanColor === -1 ? "You" : "AlphaGo Zero";
+  $("#turn-chip").innerHTML =
+    `<i class="stone-dot ${state.currentPlayer === 1 ? "black" : "white"}"></i> ${state.currentPlayer === 1 ? "Black" : "White"} to move`;
+  renderBoard();
+  renderHistory();
+  updateChart();
+  if (state.gameOver) showGameOver(data);
 }
-
-async function fetchEvaluationStats() {
+function boardLetter(col) {
+  const letters = "ABCDEFGHJKLMNOPQRST";
+  return letters[col] || "?";
+}
+function starPoints(size) {
+  return size === 12
+    ? [
+        [3, 3],
+        [3, 8],
+        [8, 3],
+        [8, 8],
+      ]
+    : size === 5
+      ? [[2, 2]]
+      : [];
+}
+function buildBoard() {
+  const svg = $("#goban");
+  svg.innerHTML = "";
+  boardCells = new Map();
+  const size = state.boardSize;
+  const margin = 55;
+  const step = (720 - margin * 2) / (size - 1);
+  const ns = "http://www.w3.org/2000/svg";
+  const defs = document.createElementNS(ns, "defs");
+  defs.innerHTML =
+    '<radialGradient id="stone-black" cx="32%" cy="25%"><stop stop-color="#67717d"/><stop offset=".35" stop-color="#242c35"/><stop offset="1" stop-color="#07090c"/></radialGradient><radialGradient id="stone-white" cx="30%" cy="23%"><stop stop-color="#fff"/><stop offset=".55" stop-color="#e0ddd2"/><stop offset="1" stop-color="#a6a196"/></radialGradient><filter id="stone-shadow"><feDropShadow dx="2" dy="4" stdDeviation="4" flood-color="#2d1608" flood-opacity=".55"/></filter>';
+  svg.append(defs);
+  const grid = document.createElementNS(ns, "g");
+  grid.setAttribute("stroke", "#4f2d16");
+  grid.setAttribute("stroke-width", "1.5");
+  grid.setAttribute("opacity", ".88");
+  for (let index = 0; index < size; index += 1) {
+    const position = margin + index * step;
+    const horizontal = document.createElementNS(ns, "line");
+    horizontal.setAttribute("x1", margin);
+    horizontal.setAttribute("x2", 720 - margin);
+    horizontal.setAttribute("y1", position);
+    horizontal.setAttribute("y2", position);
+    grid.append(horizontal);
+    const vertical = document.createElementNS(ns, "line");
+    vertical.setAttribute("x1", position);
+    vertical.setAttribute("x2", position);
+    vertical.setAttribute("y1", margin);
+    vertical.setAttribute("y2", 720 - margin);
+    grid.append(vertical);
+  }
+  svg.append(grid);
+  const points = document.createElementNS(ns, "g");
+  points.setAttribute("fill", "#3d210e");
+  starPoints(size).forEach(([row, col]) => {
+    const point = document.createElementNS(ns, "circle");
+    point.setAttribute("cx", margin + col * step);
+    point.setAttribute("cy", margin + row * step);
+    point.setAttribute("r", size === 5 ? 5 : 4);
+    points.append(point);
+  });
+  svg.append(points);
+  const labels = document.createElementNS(ns, "g");
+  labels.setAttribute("fill", "#5b351a");
+  labels.setAttribute("font-size", "12");
+  labels.setAttribute("font-family", "JetBrains Mono, monospace");
+  for (let index = 0; index < size; index += 1) {
+    const x = margin + index * step;
+    const colLabel = boardLetter(index);
+    [margin - 29, 720 - margin + 28].forEach((y) => {
+      const text = document.createElementNS(ns, "text");
+      text.setAttribute("x", x);
+      text.setAttribute("y", y);
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = colLabel;
+      labels.append(text);
+    });
+    const y = margin + index * step;
+    [margin - 20, 720 - margin + 20].forEach((xPos) => {
+      const text = document.createElementNS(ns, "text");
+      text.setAttribute("x", xPos);
+      text.setAttribute("y", y + 4);
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = String(index + 1);
+      labels.append(text);
+    });
+  }
+  svg.append(labels);
+  for (let row = 0; row < size; row += 1)
+    for (let col = 0; col < size; col += 1) {
+      const group = document.createElementNS(ns, "g");
+      group.dataset.row = row;
+      group.dataset.col = col;
+      group.setAttribute(
+        "transform",
+        `translate(${margin + col * step},${margin + row * step})`,
+      );
+      group.classList.add("intersection");
+      group.addEventListener("click", () => playMove(row, col));
+      const ghost = document.createElementNS(ns, "circle");
+      ghost.setAttribute("r", step * 0.39);
+      ghost.classList.add("ghost");
+      group.append(ghost);
+      const stone = document.createElementNS(ns, "circle");
+      stone.setAttribute("r", step * 0.39);
+      stone.setAttribute("filter", "url(#stone-shadow)");
+      group.append(stone);
+      const last = document.createElementNS(ns, "circle");
+      last.setAttribute("r", step * 0.12);
+      last.classList.add("last-marker");
+      group.append(last);
+      boardCells.set(`${row},${col}`, { group, stone, last });
+      svg.append(group);
+    }
+}
+function renderBoard() {
+  if (!boardCells.size || boardCells.size !== state.boardSize ** 2)
+    buildBoard();
+  const legal = new Set(state.legalMoves.map(([row, col]) => `${row},${col}`));
+  boardCells.forEach(({ group, stone, last }, key) => {
+    const [row, col] = key.split(",").map(Number);
+    const value = state.board[row]?.[col] || 0;
+    group.classList.toggle("legal", legal.has(key));
+    group.classList.toggle("occupied", Boolean(value));
+    stone.setAttribute(
+      "fill",
+      value === 1 ? "url(#stone-black)" : "url(#stone-white)",
+    );
+    stone.style.display = value ? "block" : "none";
+    last.style.display =
+      state.lastAiMove?.[0] === row && state.lastAiMove?.[1] === col
+        ? "block"
+        : "none";
+  });
+}
+function renderHistory() {
+  const list = $("#move-list");
+  $("#move-count").textContent = state.moveHistory.length;
+  if (!state.moveHistory.length) {
+    list.innerHTML = '<p class="muted">First move awaits the human player.</p>';
+    return;
+  }
+  list.innerHTML = state.moveHistory
+    .slice(-14)
+    .map(
+      (move, index) =>
+        `<div class="move-row ${move.player === "AI" ? "ai" : ""}"><span class="num">${String(Math.max(1, state.moveHistory.length - 13 + index)).padStart(2, "0")}</span><span>[${move.color === 1 ? "B" : "W"}] ${move.action || "PASS"}</span><span class="meta">${move.player || ""} ${move.time ? `${move.time}s` : ""}</span></div>`,
+    )
+    .join("");
+  list.scrollTop = list.scrollHeight;
+}
+function updateChart() {
+  if (!window.Chart) return;
+  const canvas = $("#value-chart");
+  if (!valueChart)
+    valueChart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: state.valueHistory.map((_, index) => index + 1),
+        datasets: [
+          {
+            data: state.valueHistory,
+            borderColor: "#f5b84b",
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.35,
+            fill: true,
+            backgroundColor: "rgba(245,184,75,.08)",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: { display: false, min: 0, max: 100 },
+        },
+      },
+    });
+  else {
+    valueChart.data.labels = state.valueHistory.map((_, index) => index + 1);
+    valueChart.data.datasets[0].data = state.valueHistory;
+    valueChart.update("none");
+  }
+}
+function setThinking(active) {
+  state.thinking = active;
+  const overlay = $("#board-thinking");
+  overlay.classList.toggle("hidden", !active);
+  $$("[data-action]").forEach((button) => {
+    button.disabled = active;
+  });
+  if (active) {
+    const started = performance.now();
+    clearInterval(thinkTimer);
+    thinkTimer = setInterval(() => {
+      $("#think-time").textContent =
+        `${((performance.now() - started) / 1000).toFixed(1)}s`;
+    }, 100);
+  } else clearInterval(thinkTimer);
+}
+async function playMove(row, col) {
+  if (
+    state.thinking ||
+    state.gameOver ||
+    !state.legalMoves.some(
+      ([legalRow, legalCol]) => legalRow === row && legalCol === col,
+    )
+  )
+    return;
+  await performAction(
+    "/api/move",
+    "POST",
+    { row, col, is_pass: false },
+    "Illegal move",
+  );
+}
+async function performAction(endpoint, method, data, fallback) {
+  setThinking(true);
   try {
-    const modelA = evalSelectModelA ? evalSelectModelA.value : "";
-    const modelB = evalSelectModelB ? evalSelectModelB.value : "";
-    const data = await apiRequest(
-      `/api/evaluation_stats?model_a=${encodeURIComponent(modelA)}&model_b=${encodeURIComponent(modelB)}`,
-    );
-
-    // Update H2H Pairwise Card
-    const h2h = data.h2h;
-    if (h2h) {
-      const h2hBadge = document.getElementById("h2h-match-count-badge");
-      const h2hModelA = document.getElementById("h2h-model-a-lbl");
-      const h2hModelB = document.getElementById("h2h-model-b-lbl");
-      const h2hScoreSummary = document.getElementById("h2h-score-summary");
-      const h2hBarA = document.getElementById("h2h-bar-a");
-      const h2hBarB = document.getElementById("h2h-bar-b");
-      const h2hWinsA = document.getElementById("h2h-wins-a");
-      const h2hWinsB = document.getElementById("h2h-wins-b");
-      const h2hDraws = document.getElementById("h2h-draws-label");
-
-      if (h2hBadge) h2hBadge.textContent = `${h2h.games_played} Games Played`;
-      if (h2hModelA) h2hModelA.textContent = h2h.model_a;
-      if (h2hModelB) h2hModelB.textContent = h2h.model_b;
-      if (h2hScoreSummary)
-        h2hScoreSummary.textContent = `${h2h.model_a_wins} Wins - ${h2h.model_b_wins} Wins`;
-      if (h2hWinsA)
-        h2hWinsA.textContent = `${h2h.model_a_wins} Wins (${h2h.win_rate_a}%)`;
-      if (h2hWinsB)
-        h2hWinsB.textContent = `${h2h.model_b_wins} Wins (${h2h.win_rate_b}%)`;
-      if (h2hDraws) h2hDraws.textContent = `${h2h.draws} Draws`;
-
-      if (h2hBarA && h2hBarB) {
-        const total = h2h.model_a_wins + h2h.model_b_wins || 1;
-        const pctA = Math.round((h2h.model_a_wins / total) * 100);
-        const pctB = 100 - pctA;
-        h2hBarA.style.width = `${pctA}%`;
-        h2hBarB.style.width = `${pctB}%`;
-      }
-    }
-
-    // Update Leaderboard Table
-    const leaderboardBody = document.getElementById("leaderboard-table-body");
-    if (leaderboardBody && data.leaderboard) {
-      leaderboardBody.innerHTML = "";
-      data.leaderboard.forEach((item, index) => {
-        const tr = document.createElement("tr");
-        tr.style.cssText =
-          "border-bottom: 1px solid var(--border-color); font-size: 0.85rem;";
-
-        const rankColor =
-          index === 0
-            ? "#ffd700"
-            : index === 1
-              ? "#c0c0c0"
-              : index === 2
-                ? "#cd7f32"
-                : "var(--text-muted)";
-        const isBest = item.model === "latest_model.pt";
-        const badgeTag = isBest
-          ? '<span class="badge badge-green" style="font-size:0.7rem;margin-left:6px;">Current Best</span>'
-          : "";
-
-        tr.innerHTML = `
-                    <td style="padding: 10px 14px; font-weight: 700; color: ${rankColor};">#${index + 1}</td>
-                    <td style="padding: 10px 14px; font-weight: 600;"><code>${item.model}</code> ${badgeTag}</td>
-                    <td style="padding: 10px 14px;"><span class="badge" style="background:rgba(56,139,253,0.15);color:#58a6ff;">Iter ${item.iteration}</span></td>
-                    <td style="padding: 10px 14px; text-align: center; font-weight: 700; color:#58a6ff;">${item.total_games}</td>
-                    <td style="padding: 10px 14px; text-align: center;">${item.wins} W - ${item.losses} L - ${item.draws} D</td>
-                    <td style="padding: 10px 14px; text-align: center; font-weight: 700; color: ${item.win_rate >= 50 ? "#39d353" : "#f85149"};">${item.win_rate}%</td>
-                    <td style="padding: 10px 14px; text-align: center; font-weight: 600; color: #a371f7;">${item.rating}</td>
-                    <td style="padding: 10px 14px; text-align: center;">
-                        <button class="btn btn-sm btn-secondary btn-set-model-a" data-model="${item.model}" style="padding: 2px 8px; font-size: 0.75rem; margin-right: 4px;">Set Model A</button>
-                        <button class="btn btn-sm btn-secondary btn-set-model-b" data-model="${item.model}" style="padding: 2px 8px; font-size: 0.75rem;">Set Model B</button>
-                    </td>
-                `;
-        leaderboardBody.appendChild(tr);
-      });
-
-      leaderboardBody.querySelectorAll(".btn-set-model-a").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          if (evalSelectModelA) evalSelectModelA.value = btn.dataset.model;
-          fetchEvaluationStats();
-        });
-      });
-      leaderboardBody.querySelectorAll(".btn-set-model-b").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          if (evalSelectModelB) evalSelectModelB.value = btn.dataset.model;
-          fetchEvaluationStats();
-        });
-      });
-    }
-  } catch (e) {
-    console.warn("Failed fetching evaluation stats:", e);
+    updateGame(await apiRequest(endpoint, method, data));
+  } catch (error) {
+    if (error.isNoSession) await startGame();
+    else toast(`${fallback}: ${error.message}`);
+  } finally {
+    setThinking(false);
   }
 }
-
-function updateActiveLevelUI(data = null) {
-  const titleEl = document.getElementById("active-level-title");
-  const subEl = document.getElementById("active-level-sub");
-
-  if (!titleEl || !subEl) return;
-
-  let levelTitle, checkpoint, sims;
-
-  if (data && data.active_model_file) {
-    // Prefer live server response
-    checkpoint = data.active_model_file;
-    sims = data.active_simulations;
-    const iterMatch = checkpoint.match(/model_iteration_(\d+)\.pt/);
-    levelTitle = iterMatch
-      ? `Iteration ${iterMatch[1]}`
-      : data.active_level_name || checkpoint;
-  } else {
-    checkpoint =
-      state.iterationModelFile || state.selectedModelFile || "Untrained";
-    sims = state.simulations;
-    const iterMatch = checkpoint.match(/model_iteration_(\d+)\.pt/);
-    levelTitle = iterMatch ? `Iteration ${iterMatch[1]}` : checkpoint;
-  }
-
-  titleEl.textContent = levelTitle;
-  subEl.innerHTML = `Checkpoint: <code>${checkpoint}</code> (${sims} MCTS Sims)`;
+async function passMove() {
+  if (!state.thinking && !state.gameOver)
+    await performAction("/api/move", "POST", { is_pass: true }, "Pass failed");
 }
-
-// ---------------------------------------------------------------------------
-// Event Listeners
-// ---------------------------------------------------------------------------
-
-function setupEventListeners() {
-  // ------------------------------------------------------------------
-  // Iteration Picker — slider
-  // ------------------------------------------------------------------
-  if (iterSlider) {
-    let sliderDebounce = null;
-    iterSlider.addEventListener("input", () => {
-      const n = parseInt(iterSlider.value);
-      if (iterBadge) iterBadge.textContent = `Iteration ${n}`;
-      // Sync dropdown immediately for visual feedback
-      const entry = state.iterationsData.find((it) => it.iteration === n);
-      if (entry && iterSelect) iterSelect.value = entry.filename;
-      // Debounce game start
-      clearTimeout(sliderDebounce);
-      sliderDebounce = setTimeout(async () => {
-        applyIteration(n);
-        await startNewGame();
-      }, 400);
-    });
-  }
-
-  // Iteration Picker — dropdown
-  if (iterSelect) {
-    iterSelect.addEventListener("change", async () => {
-      const filename = iterSelect.value;
-      const entry = state.iterationsData.find((it) => it.filename === filename);
-      if (entry) {
-        applyIteration(entry.iteration);
-        await startNewGame();
-      }
-    });
-  }
-
-  // Iteration Picker — MCTS simulations slider
-  if (iterSimsInput) {
-    iterSimsInput.addEventListener("input", () => {
-      state.simulations = parseInt(iterSimsInput.value);
-      if (iterSimsVal) iterSimsVal.textContent = state.simulations;
-      updateActiveLevelUI();
-    });
-    iterSimsInput.addEventListener("change", async () => {
-      state.simulations = parseInt(iterSimsInput.value);
-      if (iterSimsVal) iterSimsVal.textContent = state.simulations;
-      updateActiveLevelUI();
-      await startNewGame();
-    });
-  }
-
-  // Color Toggle
-  colorBtns.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      colorBtns.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      state.humanColor = parseInt(btn.dataset.color);
-    });
-  });
-
-  // Board Size Toggle
-  sizeBtns.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      sizeBtns.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      state.boardSize = parseInt(btn.dataset.size);
-      fetchLevels();
-    });
-  });
-
-  // Start New Game
-  if (btnNewGame) btnNewGame.addEventListener("click", startNewGame);
-  if (btnModalNewGame) btnModalNewGame.addEventListener("click", startNewGame);
-
-  // Toolbar buttons
-  if (btnPass) btnPass.addEventListener("click", handlePass);
-  if (btnUndo) btnUndo.addEventListener("click", handleUndo);
-  if (btnAutoAi) btnAutoAi.addEventListener("click", handleAutoAi);
-  if (btnHint) btnHint.addEventListener("click", handleHint);
-  if (btnResign) btnResign.addEventListener("click", handleResign);
-  if (btnCloseHint && hintBanner)
-    btnCloseHint.addEventListener("click", () =>
-      hintBanner.classList.add("hidden"),
-    );
-
-  // Modals
-  if (btnOpenTraining && trainingModal)
-    btnOpenTraining.addEventListener("click", () =>
-      trainingModal.classList.remove("hidden"),
-    );
-  if (btnCloseTraining && trainingModal)
-    btnCloseTraining.addEventListener("click", () =>
-      trainingModal.classList.add("hidden"),
-    );
-  if (btnOpenInfo && infoModal)
-    btnOpenInfo.addEventListener("click", () =>
-      infoModal.classList.remove("hidden"),
-    );
-  if (btnCloseInfo && infoModal)
-    btnCloseInfo.addEventListener("click", () =>
-      infoModal.classList.add("hidden"),
-    );
-  if (btnStartTraining)
-    btnStartTraining.addEventListener("click", startTraining);
-
-  if (btnOpenEval && evalModal) {
-    btnOpenEval.addEventListener("click", () => {
-      evalModal.classList.remove("hidden");
-      fetchEvaluationStats();
-    });
-  }
-  if (evalSelectModelA)
-    evalSelectModelA.addEventListener("change", fetchEvaluationStats);
-  if (evalSelectModelB)
-    evalSelectModelB.addEventListener("change", fetchEvaluationStats);
-
-  if (btnCloseEval && evalModal) {
-    btnCloseEval.addEventListener("click", () =>
-      evalModal.classList.add("hidden"),
-    );
-  }
-  if (btnStartEval) {
-    btnStartEval.addEventListener("click", startEvaluation);
-  }
-
-  if (btnOpenSelfplay && selfplayModal) {
-    btnOpenSelfplay.addEventListener("click", () => {
-      selfplayModal.classList.remove("hidden");
-      startSelfplayStatusPolling();
-    });
-  }
-  if (btnCloseSelfplay && selfplayModal) {
-    btnCloseSelfplay.addEventListener("click", () => {
-      selfplayModal.classList.add("hidden");
-      stopSelfplayStatusPolling();
-    });
-  }
-
-  // Play vs Opponent Modal Listeners
-  if (btnOpenOpponent && opponentModal) {
-    btnOpenOpponent.addEventListener("click", () => {
-      syncOpponentModalUI();
-      opponentModal.classList.remove("hidden");
-    });
-  }
-  if (btnCloseOpponent && opponentModal) {
-    btnCloseOpponent.addEventListener("click", () =>
-      opponentModal.classList.add("hidden"),
-    );
-  }
-  if (oppModalIterSlider) {
-    oppModalIterSlider.addEventListener("input", () => {
-      const n = parseInt(oppModalIterSlider.value);
-      applyIteration(n);
-    });
-  }
-  if (oppModalIterSelect) {
-    oppModalIterSelect.addEventListener("change", () => {
-      const filename = oppModalIterSelect.value;
-      const entry = state.iterationsData.find((it) => it.filename === filename);
-      if (entry) applyIteration(entry.iteration);
-    });
-  }
-  if (oppModalSimsSlider) {
-    oppModalSimsSlider.addEventListener("input", () => {
-      state.simulations = parseInt(oppModalSimsSlider.value);
-      if (iterSimsInput) iterSimsInput.value = state.simulations;
-      if (iterSimsVal) iterSimsVal.textContent = state.simulations;
-      if (oppModalSimsVal)
-        oppModalSimsVal.textContent = `${state.simulations} sims / move`;
-      updateActiveLevelUI();
-    });
-  }
-  if (oppModalColorBlack && oppModalColorWhite) {
-    oppModalColorBlack.addEventListener("click", () => {
-      state.humanColor = 1;
-      colorBtns.forEach((b) =>
-        b.classList.toggle("active", b.dataset.color == "1"),
-      );
-      syncOpponentModalUI();
-    });
-    oppModalColorWhite.addEventListener("click", () => {
-      state.humanColor = -1;
-      colorBtns.forEach((b) =>
-        b.classList.toggle("active", b.dataset.color == "-1"),
-      );
-      syncOpponentModalUI();
-    });
-  }
-  if (oppModalSize12 && oppModalSize5) {
-    oppModalSize12.addEventListener("click", () => {
-      state.boardSize = 12;
-      sizeBtns.forEach((b) =>
-        b.classList.toggle("active", b.dataset.size == "12"),
-      );
-      syncOpponentModalUI();
-      fetchLevels();
-    });
-    oppModalSize5.addEventListener("click", () => {
-      state.boardSize = 5;
-      sizeBtns.forEach((b) =>
-        b.classList.toggle("active", b.dataset.size == "5"),
-      );
-      syncOpponentModalUI();
-      fetchLevels();
-    });
-  }
-  if (btnOppModalStart) {
-    btnOppModalStart.addEventListener("click", async () => {
-      opponentModal.classList.add("hidden");
-      await startNewGame();
-    });
-  }
-
-  // Backdrop click (click outside modal box) to close
-  document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) {
-        hideModals();
-      }
-    });
-  });
-
-  // Close buttons (.btn-modal-close)
-  document.querySelectorAll(".btn-modal-close").forEach((btn) => {
-    btn.addEventListener("click", hideModals);
-  });
-
-  // Escape to close modals
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hideModals();
-  });
+async function undoMove() {
+  if (!state.thinking)
+    await performAction("/api/undo", "POST", null, "Undo failed");
 }
-
-let spStatusPollInterval = null;
-
-function startSelfplayStatusPolling() {
-  fetchSelfplayStatus();
-  clearInterval(spStatusPollInterval);
-  spStatusPollInterval = setInterval(fetchSelfplayStatus, 2000);
+async function aiMove() {
+  if (!state.thinking && !state.gameOver)
+    await performAction("/api/ai_move", "POST", null, "AI move failed");
 }
-
-function stopSelfplayStatusPolling() {
-  clearInterval(spStatusPollInterval);
+async function hint() {
+  if (state.thinking || state.gameOver) return;
+  try {
+    const data = await apiRequest("/api/hint", "POST");
+    state.lastAiMove = data.coords;
+    $("#hint-copy").textContent =
+      data.explanation || "The engine found a promising continuation.";
+    renderBoard();
+    toast(data.explanation || "Hint ready", "ok");
+  } catch (error) {
+    toast(`Hint unavailable: ${error.message}`);
+  }
 }
-
-async function fetchSelfplayStatus() {
+function showGameOver(data) {
+  const dialog = $("#game-dialog");
+  $("#dialog-title").textContent =
+    data.winner === state.humanColor
+      ? "A measured victory"
+      : data.winner === 0
+        ? "A balanced game"
+        : "The policy takes it";
+  $("#dialog-copy").textContent = data.resignation
+    ? "The match ended by resignation."
+    : "The final territory count is in.";
+  $("#dialog-black").textContent = data.black_score ?? 0;
+  $("#dialog-white").textContent = data.white_score ?? 0;
+  if (!dialog.open) dialog.showModal();
+}
+function renderEvaluation(data) {
+  if (!data) return;
+  const h2h = data.h2h || {};
+  $("#h2h-title").textContent = `${h2h.games_played || 0} games played`;
+  $("#rate-a").textContent =
+    h2h.win_rate_a == null ? "--" : `${h2h.win_rate_a}%`;
+  $("#rate-b").textContent =
+    h2h.win_rate_b == null ? "--" : `${h2h.win_rate_b}%`;
+  $("#name-a").textContent = h2h.model_a || "Model A";
+  $("#name-b").textContent = h2h.model_b || "Model B";
+  const total = Math.max(1, (h2h.win_rate_a || 0) + (h2h.win_rate_b || 0));
+  $("#match-a").style.width = `${((h2h.win_rate_a || 0) / total) * 100}%`;
+  $("#match-b").style.width = `${((h2h.win_rate_b || 0) / total) * 100}%`;
+  $("#draws").textContent = `${h2h.draws || 0} draws`;
+  $("#promotion-badge").textContent =
+    (h2h.win_rate_a || 0) >= 55
+      ? "PROMOTED A"
+      : (h2h.win_rate_b || 0) >= 55
+        ? "PROMOTED B"
+        : "Below threshold";
+  const rows = data.leaderboard || [];
+  $("#leaderboard").innerHTML = rows.length
+    ? rows
+        .map(
+          (item, index) =>
+            `<tr><td>${index + 1}</td><td><b>${item.model}</b></td><td>${item.wins}-${item.losses}-${item.draws}</td><td>${item.win_rate}%</td><td>${item.rating}</td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="5" class="muted">No evaluation results reported.</td></tr>';
+}
+async function loadSelfplayStatus() {
   try {
     const data = await apiRequest("/api/selfplay_status");
-    const statIter = document.getElementById("sp-stat-iteration");
-    const statGames = document.getElementById("sp-stat-games");
-    const statExamples = document.getElementById("sp-stat-examples");
-    const statModels = document.getElementById("sp-stat-models");
-
-    if (statIter)
-      statIter.textContent =
-        data.current_iteration ||
-        (state.iterationsData ? state.iterationsData.length : 0);
-    if (statGames) statGames.textContent = data.games_played || 0;
-    if (statExamples)
-      statExamples.textContent = (data.total_examples || 0).toLocaleString();
-    if (statModels) statModels.textContent = data.models_trained || 0;
-
-    const progressLbl = document.getElementById("sp-progress-label");
-    const progressFill = document.getElementById("sp-progress-fill");
-    if (progressLbl)
-      progressLbl.textContent =
-        data.progress ||
-        (data.is_active ? "Training in progress..." : "Pipeline Ready / Idle");
-    if (progressFill)
-      progressFill.style.width = data.is_active ? "65%" : "100%";
-
-    const logTerm = document.getElementById("sp-log-terminal");
-    if (logTerm && data.log && data.log.length > 0) {
-      logTerm.innerHTML = data.log.join("\n");
-      logTerm.scrollTop = logTerm.scrollHeight;
+    $("#sp-iteration").textContent = data.current_iteration ?? "--";
+    $("#sp-games").textContent = data.games_played ?? "--";
+    $("#sp-examples").textContent =
+      data.total_examples == null
+        ? "--"
+        : Number(data.total_examples).toLocaleString();
+    $("#sp-models").textContent = data.models_trained ?? "--";
+    $("#sp-status").textContent = data.is_active ? "Running" : "Idle";
+    $("#sp-log").textContent =
+      data.log?.join("\n") || data.progress || "No log lines reported.";
+    if (data.model_files) {
+      $("#checkpoint-grid").innerHTML = data.model_files
+        .map(
+          (item) =>
+            `<div class="checkpoint"><strong>ITER ${item.iteration}</strong><span>${item.filename} / ${item.size_kb} KB</span></div>`,
+        )
+        .join("");
     }
-
-    const modelsGrid = document.getElementById("sp-models-grid");
-    if (modelsGrid && data.model_files) {
-      modelsGrid.innerHTML = "";
-      data.model_files.forEach((m) => {
-        const item = document.createElement("div");
-        item.className = "sp-model-item";
-        item.style.cssText =
-          "background:rgba(255,255,255,0.04);padding:8px 12px;border-radius:8px;border:1px solid var(--border-color);font-size:0.8rem;";
-        item.innerHTML = `<strong>${m.filename}</strong><div style="font-size:0.75rem;color:var(--text-muted);">Iter ${m.iteration} • ${m.size_kb} KB</div>`;
-        modelsGrid.appendChild(item);
-      });
-    }
-  } catch (e) {
-    console.warn("Could not fetch selfplay status:", e);
+  } catch (error) {
+    toast(`Self-play telemetry unavailable: ${error.message}`);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Interactive Self-Play Controller
-// ---------------------------------------------------------------------------
-
-let selfplayState = {
-  isRunning: false,
-  isPaused: false,
-  timer: null,
-  speedMs: 800,
-};
-
-function populateSelfPlayModels() {
-  const spModelBlack = document.getElementById("sp-model-black");
-  const spModelWhite = document.getElementById("sp-model-white");
-
-  if (!spModelBlack || !spModelWhite) return;
-
-  let optionsHtml =
-    '<option value="latest_model.pt">latest_model.pt (Current Best)</option>';
-  optionsHtml +=
-    '<option value="untrained">Untrained / Random Network</option>';
-
-  if (state.iterationsData && state.iterationsData.length > 0) {
-    state.iterationsData.forEach((item) => {
-      optionsHtml += `<option value="${item.filename}">${item.filename} (Iter ${item.iteration})</option>`;
-    });
-  }
-
-  spModelBlack.innerHTML = optionsHtml;
-  spModelWhite.innerHTML = optionsHtml;
-
-  if (state.iterationsData.length > 0) {
-    spModelBlack.value = state.iterationsData[0].filename;
-    spModelWhite.value =
-      state.iterationsData[state.iterationsData.length - 1].filename;
-  }
-}
-
-async function startSelfPlayMatch() {
-  const spModelBlack = document.getElementById("sp-model-black").value;
-  const spModelWhite = document.getElementById("sp-model-white").value;
-  const spSimsBlack =
-    parseInt(document.getElementById("sp-sims-black").value) || 25;
-  const spSimsWhite =
-    parseInt(document.getElementById("sp-sims-white").value) || 25;
-  const spTempBlack =
-    parseFloat(document.getElementById("sp-temp-black").value) || 1.0;
-  const spTempWhite =
-    parseFloat(document.getElementById("sp-temp-white").value) || 1.0;
-  const spBoardSize =
-    parseInt(document.getElementById("sp-board-size").value) || 12;
-  const spTempThreshold =
-    parseInt(document.getElementById("sp-temp-threshold").value) || 30;
-  const spPlaySpeed =
-    parseInt(document.getElementById("sp-play-speed").value) || 800;
-
-  selfplayState.speedMs = spPlaySpeed;
-  selfplayState.isRunning = true;
-  selfplayState.isPaused = false;
-
-  const btnStart = document.getElementById("btn-sp-start");
-  const btnPause = document.getElementById("btn-sp-pause");
-  const btnStep = document.getElementById("btn-sp-step");
-  const btnStop = document.getElementById("btn-sp-stop");
-
-  if (btnStart) btnStart.classList.add("hidden");
-  if (btnPause) {
-    btnPause.classList.remove("hidden");
-    btnPause.innerHTML = '<span class="icon">⏸</span> Pause';
-  }
-  if (btnStep) btnStep.classList.remove("hidden");
-  if (btnStop) btnStop.classList.remove("hidden");
-
+async function startSelfplay() {
+  const payload = {
+    board_size: 12,
+    model_black: $("#sp-model-black").value || "untrained",
+    sims_black: Number($("#sp-sims-black").value) || 25,
+    temp_black: Number($("#sp-temp-black").value) || 1,
+    model_white: $("#sp-model-white").value || "untrained",
+    sims_white: Number($("#sp-sims-white").value) || 25,
+    temp_white: Number($("#sp-temp-black").value) || 1,
+    temp_threshold: Number($("#sp-temp-threshold").value) || 30,
+  };
   try {
-    const payload = {
-      board_size: spBoardSize,
-      model_black: spModelBlack,
-      sims_black: spSimsBlack,
-      temp_black: spTempBlack,
-      model_white: spModelWhite,
-      sims_white: spSimsWhite,
-      temp_white: spTempWhite,
-      temp_threshold: spTempThreshold,
-    };
-
-    const res = await apiRequest("/api/selfplay/new_game", "POST", payload);
-    updateGameState(res);
-
-    if (spPlaySpeed > 0) {
-      runSelfPlayLoop();
-    }
-  } catch (e) {
-    alert(`Failed to start self-play: ${e.message}`);
-    stopSelfPlayMatch();
+    updateGame(await apiRequest("/api/selfplay/new_game", "POST", payload));
+    await selfplayStep();
+  } catch (error) {
+    toast(`Self-play could not start: ${error.message}`);
   }
 }
-
-function runSelfPlayLoop() {
-  clearTimeout(selfplayState.timer);
-  if (!selfplayState.isRunning || selfplayState.isPaused) return;
-
-  selfplayState.timer = setTimeout(async () => {
-    if (!selfplayState.isRunning || selfplayState.isPaused) return;
-    const gameOver = await stepSelfPlayMatch();
-    if (!gameOver && selfplayState.speedMs > 0) {
-      runSelfPlayLoop();
-    }
-  }, selfplayState.speedMs);
-}
-
-async function stepSelfPlayMatch() {
+async function selfplayStep() {
   try {
-    setAiThinking(true);
-    const res = await apiRequest("/api/selfplay/step", "POST");
-    soundEngine.playStoneClick();
-    updateGameState(res);
-
-    if (res.game_over) {
-      stopSelfPlayMatch();
-      return true;
-    }
-    return false;
-  } catch (e) {
-    console.error("Self-play step failed:", e);
-    stopSelfPlayMatch();
-    return true;
-  } finally {
-    setAiThinking(false);
+    updateGame(await apiRequest("/api/selfplay/step", "POST"));
+  } catch (error) {
+    toast(`Self-play step failed: ${error.message}`);
   }
 }
-
-function togglePauseSelfPlay() {
-  const btnPause = document.getElementById("btn-sp-pause");
-  selfplayState.isPaused = !selfplayState.isPaused;
-
-  if (selfplayState.isPaused) {
-    clearTimeout(selfplayState.timer);
-    if (btnPause) btnPause.innerHTML = '<span class="icon">▶</span> Resume';
-  } else {
-    if (btnPause) btnPause.innerHTML = '<span class="icon">⏸</span> Pause';
-    runSelfPlayLoop();
-  }
-}
-
-function stopSelfPlayMatch() {
-  selfplayState.isRunning = false;
-  selfplayState.isPaused = false;
-  clearTimeout(selfplayState.timer);
-
-  const btnStart = document.getElementById("btn-sp-start");
-  const btnPause = document.getElementById("btn-sp-pause");
-  const btnStep = document.getElementById("btn-sp-step");
-  const btnStop = document.getElementById("btn-sp-stop");
-
-  if (btnStart) btnStart.classList.remove("hidden");
-  if (btnPause) btnPause.classList.add("hidden");
-  if (btnStep) btnStep.classList.add("hidden");
-  if (btnStop) btnStop.classList.add("hidden");
-}
-
-async function saveSelfPlayDataset() {
+async function saveSelfplay() {
   try {
-    const res = await apiRequest("/api/selfplay/save_data", "POST");
-    alert(
-      `Dataset saved: ${res.filename} (${res.examples_count} training triples)`,
-    );
-  } catch (e) {
-    alert(`Save failed: ${e.message}`);
+    const data = await apiRequest("/api/selfplay/save_data", "POST");
+    toast(`Saved ${data.examples_count || 0} examples`, "ok");
+  } catch (error) {
+    toast(`No self-play data saved: ${error.message}`);
   }
 }
-
-function applySelfPlayPreset(presetType) {
-  const spModelBlack = document.getElementById("sp-model-black");
-  const spModelWhite = document.getElementById("sp-model-white");
-  const spSimsBlack = document.getElementById("sp-sims-black");
-  const spSimsWhite = document.getElementById("sp-sims-white");
-  const spTempBlack = document.getElementById("sp-temp-black");
-  const spTempWhite = document.getElementById("sp-temp-white");
-  const spBoardSize = document.getElementById("sp-board-size");
-
-  if (presetType === "duel") {
-    if (state.iterationsData.length > 0) {
-      spModelBlack.value = state.iterationsData[0].filename;
-      spModelWhite.value =
-        state.iterationsData[state.iterationsData.length - 1].filename;
-    }
-    spSimsBlack.value = 25;
-    spSimsWhite.value = 100;
-    spTempBlack.value = 0.5;
-    spTempWhite.value = 0.5;
-    spBoardSize.value = "12";
-  } else if (presetType === "self") {
-    spModelBlack.value = "latest_model.pt";
-    spModelWhite.value = "latest_model.pt";
-    spSimsBlack.value = 25;
-    spSimsWhite.value = 25;
-    spTempBlack.value = 1.0;
-    spTempWhite.value = 1.0;
-    spBoardSize.value = "12";
-  } else if (presetType === "fast") {
-    spModelBlack.value = "latest_model.pt";
-    spModelWhite.value = "latest_model.pt";
-    spSimsBlack.value = 10;
-    spSimsWhite.value = 10;
-    spTempBlack.value = 1.0;
-    spTempWhite.value = 1.0;
-    spBoardSize.value = "5";
-  }
-
-  document.getElementById("sp-sims-black-val").textContent = spSimsBlack.value;
-  document.getElementById("sp-sims-white-val").textContent = spSimsWhite.value;
-  document.getElementById("sp-temp-black-val").textContent = spTempBlack.value;
-  document.getElementById("sp-temp-white-val").textContent = spTempWhite.value;
-}
-
-function setupSelfPlayEventListeners() {
-  const btnStart = document.getElementById("btn-sp-start");
-  const btnPause = document.getElementById("btn-sp-pause");
-  const btnStep = document.getElementById("btn-sp-step");
-  const btnStop = document.getElementById("btn-sp-stop");
-  const btnSaveData = document.getElementById("btn-sp-save-data");
-
-  const btnPresetDuel = document.getElementById("btn-sp-preset-duel");
-  const btnPresetSelf = document.getElementById("btn-sp-preset-self");
-  const btnPresetFast = document.getElementById("btn-sp-preset-fast");
-
-  const spSimsBlack = document.getElementById("sp-sims-black");
-  const spSimsWhite = document.getElementById("sp-sims-white");
-  const spTempBlack = document.getElementById("sp-temp-black");
-  const spTempWhite = document.getElementById("sp-temp-white");
-
-  if (btnStart) btnStart.addEventListener("click", startSelfPlayMatch);
-  if (btnPause) btnPause.addEventListener("click", togglePauseSelfPlay);
-  if (btnStep) btnStep.addEventListener("click", stepSelfPlayMatch);
-  if (btnStop) btnStop.addEventListener("click", stopSelfPlayMatch);
-  if (btnSaveData) btnSaveData.addEventListener("click", saveSelfPlayDataset);
-
-  if (btnPresetDuel)
-    btnPresetDuel.addEventListener("click", () => applySelfPlayPreset("duel"));
-  if (btnPresetSelf)
-    btnPresetSelf.addEventListener("click", () => applySelfPlayPreset("self"));
-  if (btnPresetFast)
-    btnPresetFast.addEventListener("click", () => applySelfPlayPreset("fast"));
-
-  if (spSimsBlack)
-    spSimsBlack.addEventListener("input", () => {
-      document.getElementById("sp-sims-black-val").textContent =
-        spSimsBlack.value;
-    });
-  if (spSimsWhite)
-    spSimsWhite.addEventListener("input", () => {
-      document.getElementById("sp-sims-white-val").textContent =
-        spSimsWhite.value;
-    });
-  if (spTempBlack)
-    spTempBlack.addEventListener("input", () => {
-      document.getElementById("sp-temp-black-val").textContent =
-        spTempBlack.value;
-    });
-  if (spTempWhite)
-    spTempWhite.addEventListener("input", () => {
-      document.getElementById("sp-temp-white-val").textContent =
-        spTempWhite.value;
-    });
-}
-
-function setAiThinking(thinking) {
-  state.isAiThinking = thinking;
-  if (thinking) {
-    aiThinkingOverlay.classList.remove("hidden");
-  } else {
-    aiThinkingOverlay.classList.add("hidden");
+async function startTraining() {
+  try {
+    await apiRequest("/api/train?iterations=1", "POST");
+    toast("Training worker started", "ok");
+    const poll = setInterval(async () => {
+      const data = await apiRequest("/api/train_status");
+      $("#sp-status").textContent = data.is_training ? "Training" : "Idle";
+      $("#sp-log").textContent =
+        data.log?.join("\n") || data.progress || "No training log reported.";
+      if (!data.is_training) clearInterval(poll);
+    }, 2000);
+  } catch (error) {
+    toast(`Training could not start: ${error.message}`);
   }
 }
-
-function capitalize(s) {
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+async function runEvaluation() {
+  const payload = {
+    model_a_file: $("#eval-model-a").value,
+    model_b_file: $("#eval-model-b").value,
+    sims_a: 25,
+    sims_b: 100,
+    num_games: Number($("#eval-games").value) || 10,
+    board_size: Number($("#eval-board").value) || 12,
+  };
+  $("#eval-status").textContent = "Running";
+  try {
+    await apiRequest("/api/evaluate", "POST", payload);
+    evaluationPoll = setInterval(async () => {
+      const data = await apiRequest("/api/evaluation_status");
+      if (!data.is_evaluating) {
+        clearInterval(evaluationPoll);
+        $("#eval-status").textContent = "Complete";
+        renderEvaluation(
+          await apiRequest(
+            `/api/evaluation_stats?model_a=${encodeURIComponent(payload.model_a_file)}&model_b=${encodeURIComponent(payload.model_b_file)}`,
+          ),
+        );
+      }
+    }, 1500);
+  } catch (error) {
+    clearInterval(evaluationPoll);
+    toast(`Evaluation could not start: ${error.message}`);
+    $("#eval-status").textContent = "Error";
+  }
 }
-
-// Launch
-window.addEventListener("DOMContentLoaded", init);
+function changeTab(tab) {
+  $$(".tab").forEach((button) =>
+    button.classList.toggle("active", button.dataset.tab === tab),
+  );
+  $$(".tab-panel").forEach((panel) =>
+    panel.classList.toggle("active", panel.dataset.panel === tab),
+  );
+  if (tab === "selfplay") {
+    loadSelfplayStatus();
+    clearInterval(selfplayPoll);
+    selfplayPoll = setInterval(loadSelfplayStatus, 5000);
+  } else clearInterval(selfplayPoll);
+  if (tab === "evaluation") loadEvaluation();
+}
+function bind() {
+  $$(".tab").forEach((button) =>
+    button.addEventListener("click", () => changeTab(button.dataset.tab)),
+  );
+  $$("[data-board]").forEach((button) =>
+    button.addEventListener("click", () => {
+      $$("[data-board]").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      state.boardSize = Number(button.dataset.board);
+      loadLevels();
+    }),
+  );
+  $$("[data-color]").forEach((button) =>
+    button.addEventListener("click", () => {
+      $$("[data-color]").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      state.humanColor = Number(button.dataset.color);
+    }),
+  );
+  $("#model-select").addEventListener("change", (event) => {
+    state.modelFile = event.target.value;
+  });
+  $("#sims-range").addEventListener("input", (event) => {
+    state.simulations = Number(event.target.value);
+    $("#sims-value").textContent = state.simulations;
+  });
+  $("#new-game").addEventListener("click", startGame);
+  $("[data-action=pass]").addEventListener("click", passMove);
+  $("[data-action=undo]").addEventListener("click", undoMove);
+  $("[data-action=hint]").addEventListener("click", hint);
+  $("[data-action=ai]").addEventListener("click", aiMove);
+  $("#cancel-thinking").addEventListener("click", () =>
+    toast(
+      "The current request cannot be cancelled by the backend; waiting for its response.",
+    ),
+  );
+  $("#wake-retry").addEventListener("click", () => {
+    wakeAttempt = 0;
+    wakeEngine();
+  });
+  $("#sp-start").addEventListener("click", startSelfplay);
+  $("#sp-step").addEventListener("click", selfplayStep);
+  $("#sp-save").addEventListener("click", saveSelfplay);
+  $("#sp-train").addEventListener("click", startTraining);
+  $("#eval-start").addEventListener("click", runEvaluation);
+  $("[data-close-dialog]").addEventListener("click", () =>
+    $("#game-dialog").close(),
+  );
+  $("#dialog-new-game").addEventListener("click", () => {
+    $("#game-dialog").close();
+    startGame();
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.target.matches("input,select,textarea")) return;
+    if (event.key.toLowerCase() === "p") passMove();
+    if (event.key.toLowerCase() === "u") undoMove();
+    if (event.key.toLowerCase() === "h") hint();
+  });
+}
+bind();
+wakeEngine();

@@ -90,4 +90,4 @@ class GoNetwork(nn.Module):
 
         policy = F.softmax(policy, dim=1)
 
-        return policy, value
+        return policy, value
