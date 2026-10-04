@@ -238,6 +238,12 @@ async function init() {
     }
 
     try {
+        await fetchEvaluationStats();
+    } catch (e) {
+        console.warn("fetchEvaluationStats failed:", e);
+    }
+
+    try {
         await startNewGame();
     } catch (e) {
         console.warn("startNewGame failed:", e);
