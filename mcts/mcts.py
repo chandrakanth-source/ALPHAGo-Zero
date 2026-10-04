@@ -253,6 +253,9 @@ class MCTS:
         child
     ):
 
+        if child.state is not None:
+            return
+
         state = node.state
 
         # Create a fresh GoGame state.

@@ -10,6 +10,24 @@ class GoGame:
             return False
         if not self.is_empty(row, col):
             return False
+
+        # Fast path check: if position has an empty neighbor and won't capture opponent stones
+        has_empty_nbr = False
+        opponent = -self.current_player
+        captures_possible = False
+        for nr, nc in self.get_neighbors(row, col):
+            val = self.board[nr, nc]
+            if val == 0:
+                has_empty_nbr = True
+            elif val == opponent:
+                group = self.get_group(nr, nc)
+                if len(self.get_liberties(group)) == 1:
+                    captures_possible = True
+                    break
+
+        if has_empty_nbr and not captures_possible:
+            return True
+
         old_board = self.board.copy()
         self.board[row, col] = self.current_player
         captured = self.capture_opponent_groups(row, col)
@@ -19,10 +37,8 @@ class GoGame:
         new_hash = self.get_board_hash()
         illegal_ko = new_hash in self.history
         self.board = old_board
-        if illegal_suicide:
-             return False
-        if illegal_ko:
-             return False
+        if illegal_suicide or illegal_ko:
+            return False
         return True
     def get_legal_moves(self):
         if self.game_over:

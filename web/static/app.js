@@ -692,31 +692,66 @@ async function loadSelfplayStatus() {
     toast(`Self-play telemetry unavailable: ${error.message}`);
   }
 }
+let autoSelfplayTimer = null;
+
 async function startSelfplay() {
+  const btn = $("#sp-start");
+  if (autoSelfplayTimer) {
+    clearInterval(autoSelfplayTimer);
+    autoSelfplayTimer = null;
+    if (btn) btn.textContent = "Start self-play";
+    toast("Self-play paused.");
+    return;
+  }
+
   const payload = {
     board_size: 12,
-    model_black: $("#sp-model-black").value || "untrained",
-    sims_black: Number($("#sp-sims-black").value) || 25,
-    temp_black: Number($("#sp-temp-black").value) || 1,
-    model_white: $("#sp-model-white").value || "untrained",
-    sims_white: Number($("#sp-sims-white").value) || 25,
-    temp_white: Number($("#sp-temp-black").value) || 1,
-    temp_threshold: Number($("#sp-temp-threshold").value) || 30,
+    model_black: $("#sp-model-black")?.value || "untrained",
+    sims_black: Number($("#sp-sims-black")?.value) || 25,
+    temp_black: Number($("#sp-temp-black")?.value) || 1,
+    model_white: $("#sp-model-white")?.value || "untrained",
+    sims_white: Number($("#sp-sims-white")?.value) || 25,
+    temp_white: Number($("#sp-temp-white")?.value || $("#sp-temp-black")?.value) || 1,
+    temp_threshold: Number($("#sp-temp-threshold")?.value) || 30,
   };
+
   try {
-    updateGame(await apiRequest("/api/selfplay/new_game", "POST", payload));
-    await selfplayStep();
+    const initRes = await apiRequest("/api/selfplay/new_game", "POST", payload);
+    updateGame(initRes);
+    if (btn) btn.textContent = "Pause self-play";
+    toast("Self-play started", "ok");
+
+    autoSelfplayTimer = setInterval(async () => {
+      if (state.gameOver) {
+        clearInterval(autoSelfplayTimer);
+        autoSelfplayTimer = null;
+        if (btn) btn.textContent = "Start self-play";
+        toast("Self-play match finished!", "ok");
+        return;
+      }
+      await selfplayStep();
+    }, 400);
   } catch (error) {
+    if (btn) btn.textContent = "Start self-play";
     toast(`Self-play could not start: ${error.message}`);
   }
 }
+
 async function selfplayStep() {
   try {
-    updateGame(await apiRequest("/api/selfplay/step", "POST"));
+    const res = await apiRequest("/api/selfplay/step", "POST");
+    updateGame(res);
   } catch (error) {
+    if (autoSelfplayTimer) {
+      clearInterval(autoSelfplayTimer);
+      autoSelfplayTimer = null;
+      const btn = $("#sp-start");
+      if (btn) btn.textContent = "Start self-play";
+    }
     toast(`Self-play step failed: ${error.message}`);
   }
 }
+
 async function saveSelfplay() {
   try {
     const data = await apiRequest("/api/selfplay/save_data", "POST");
@@ -725,8 +760,14 @@ async function saveSelfplay() {
     toast(`No self-play data saved: ${error.message}`);
   }
 }
+
 async function startTraining() {
+  const btn = $("#sp-train");
   try {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Training in progress...";
+    }
     await apiRequest("/api/train?iterations=1", "POST");
     toast("Training worker started", "ok");
     const poll = setInterval(async () => {
@@ -734,9 +775,19 @@ async function startTraining() {
       $("#sp-status").textContent = data.is_training ? "Training" : "Idle";
       $("#sp-log").textContent =
         data.log?.join("\n") || data.progress || "No training log reported.";
-      if (!data.is_training) clearInterval(poll);
+      if (!data.is_training) {
+        clearInterval(poll);
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Train one iteration";
+        }
+      }
     }, 2000);
   } catch (error) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Train one iteration";
+    }
     toast(`Training could not start: ${error.message}`);
   }
 }
@@ -829,8 +880,8 @@ function bind() {
   $("#sp-save").addEventListener("click", saveSelfplay);
   $("#sp-train").addEventListener("click", startTraining);
   $("#eval-start").addEventListener("click", runEvaluation);
-  $("[data-close-dialog]").addEventListener("click", () =>
-    $("#game-dialog").close(),
+  $$("[data-close-dialog]").forEach((btn) =>
+    btn.addEventListener("click", () => $("#game-dialog")?.close()),
   );
   $("#dialog-new-game").addEventListener("click", () => {
     $("#game-dialog").close();
