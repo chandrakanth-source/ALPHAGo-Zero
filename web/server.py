@@ -903,6 +903,9 @@ def save_evaluation_match_record(entry: Dict[str, Any]):
     except Exception as e:
         print("Failed saving eval match record:", e)
 
+# Seed initial evaluation history on server load
+seed_initial_evaluation_history()
+
 evaluation_state = {
     "is_evaluating": False,
     "progress": "Idle",
