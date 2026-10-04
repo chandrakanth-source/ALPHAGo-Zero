@@ -1,0 +1,8 @@
+.venv/
+.kilo/
+.git/
+models/
+data/
+tests/
+__pycache__/
+*.pt
