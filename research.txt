@@ -475,3 +475,475 @@ Day 13:
 6.Then create the test case file for the iteaion.py.
 7.and also train_iteration.py create and then open that.
 8.
+
+day 14:
+1.Each training example should conceptually contain:(state, policy, value)
+  State ;The Go board position:
+  Policy :MCTS's improved move distribution:
+  Value  :The final game outcome:
+2.we are runin gthe  run_iteration.py for t model latest_iteration.pt.
+3.Then create the verify_iteration_model.py for  the iteration1.pt.
+4.MODEL 0
+   ↓
+SELF-PLAY 1
+   ↓
+DATA 1
+   ↓
+TRAIN
+   ↓
+MODEL 1
+   ↓
+SELF-PLAY 2
+   ↓
+DATA 2
+   ↓
+TRAIN
+   ↓
+MODEL 2
+
+day 15 :
+
+1.               Model 1
+                ↓
+            Self-play
+                ↓
+             Training
+                ↓
+             Model 2
+                ↓
+        ┌─────────────────┐
+        │ Compare Models  │
+        └────────┬────────┘
+                 ↓
+        Is Model 2 better?
+          ↙              ↘
+        YES              NO
+         ↓                ↓
+     Promote Model 2   Keep Model 1
+2.Day 15 = Model Evaluation + Model Promotion.
+3.pytest tests/test_model_evaluator.py -v  :TO run seperate tests in th lisis of the tests folder.
+4.This is the beginning of our model-vs-model framework. for the model_match.py isnide the evaluation folder.
+5.Player 1 → Old Model      Player 2 → New Model
+  Player Black              Player White
+     ↓                          ↓
+  Model 1                   Model 2
+  Then we play multiple games.
+6.We alternate colors so that one model isn't unfairly advantaged by always playing first.
+Game 1
+Model 1 vs Model 2
+
+Game 2
+Model 2 vs Model 1
+
+Game 3
+Model 1 vs Model 2
+
+Game 4
+Model 2 vs Model 1
+5.20 games   Old Model = 8 wins    New Model = 12 wins
+WinRatenew​=12/20​=0.60
+6.day 15 architecture pipeline:
+                 MODEL 1
+                    │
+                    │
+                    ▼
+              SELF-PLAY
+                    │
+                    ▼
+                TRAINING
+                    │
+                    ▼
+                 MODEL 2
+                    │
+                    │
+                    ▼
+             ┌───────────────┐
+             │ MODEL MATCH   │
+             └───────┬───────┘
+                     │
+             ┌───────┴───────┐
+             ▼               ▼
+          MODEL 1          MODEL 2
+             │               │
+             └───────┬───────┘
+                     ▼
+                 RESULTS
+                     │
+                     ▼
+                WIN RATE
+                     │
+              ┌──────┴──────┐
+              ▼             ▼
+          >= 55%          < 55%
+              │             │
+              ▼             ▼
+          PROMOTE         REJECT
+              │             │
+              ▼             ▼
+        latest_model    keep old model
+7.Model 1
+   ↓
+Model 2
+   ↓
+Evaluation
+   ↓
+Model 2 wins
+   ↓
+Model 2 becomes latest_model.pt
+8.it loads :models/model_iteration_1.pt  an d models/model_iteration_2.pt
+  and creates separate evaluators: 
+   Model 1                                 Model 2
+   ↓                                          ↓
+Old NetworkEvaluator                       New NetworkEvaluator
+9.Then we'll connect it to the win-rate + promotion system we just created.
+10.Model 1
+   ↓
+GoNetwork
+   ↓
+NetworkEvaluator
+   ↓
+MCTS
+   ↓
+       ✅
+
+Model 2
+   ↓
+GoNetwork
+   ↓
+NetworkEvaluator
+   ↓
+MCTS
+   ↓
+       ✅
+6.python evaluation/test_models.py  : Python starts with the evaluation directory as the script location.
+  python -m evaluation.test_models  : from the project root, Python knows:from the project root, Python knows:is the project/package location, so:can resolve correctly.
+
+
+day 16:
+Model 2
+   ↓
+Self-play
+   ↓
+Training
+   ↓
+Model 3
+   ↓
+Evaluation
+   ↓
+Promote / Reject
+2.                 ┌───────────────┐
+                 │ Latest Model  │
+                 └───────┬───────┘
+                         ↓
+                    SELF-PLAY
+                         ↓
+                    DATASET
+                         ↓
+                     TRAINING
+                         ↓
+                    NEW MODEL
+                         ↓
+                    EVALUATION
+                         ↓
+              ┌──────────┴──────────┐
+              ↓                     ↓
+          Better                  Worse
+              ↓                     ↓
+          PROMOTE                REJECT
+              ↓                     ↓
+       Latest Model             Old Model
+3.models/model_iteration_2.pt
+            ↓
+         Self-play
+            ↓
+data/self_play_iteration_3.pt
+4.
+
+day 17:
+1.                    Model 2
+                       │
+                       │
+                 ┌─────▼─────┐
+                 │ Self-play │
+                 └─────┬─────┘
+                       │
+                       ▼
+                Training Dataset
+                       │
+                       ▼
+                 ┌───────────┐
+                 │  Model 3  │
+                 └─────┬─────┘
+                       │
+              ┌────────▼────────┐
+              │ Model 2 vs Model 3│
+              └────────┬────────┘
+                       │
+                       ▼
+                  Win rate
+                       │
+              ┌────────┴────────┐
+              │                 │
+           ≥ 55%              < 55%
+              │                 │
+              ▼                 ▼
+           PROMOTE            REJECT
+2.Build the real Model-vs-Model evaluator
+Target:
+models/model_iteration_2.pt
+              VS
+models/model_iteration_3.pt
+              ↓
+        actual Go games
+              ↓
+       wins / losses / draws
+              ↓
+          win rate
+              ↓
+       promote or reject
+3.Model 2
+   ↓
+MCTS
+   ↓
+GoGame ← actual game
+   ↑
+MCTS
+   ↑
+Model 3
+   ↓
+Winner
+   ↓
+Win rate
+
+day 18:
+1.TOday pleaaecompet the pipeline as :
+                         State
+                           ↓
+                     ┌──────────┐
+                     │ Network  │
+                     └────┬─────┘
+                          │
+                  Policy + Value
+                     ↓         ↓
+                  Priors     Value
+                     ↓         ↓
+                  ┌──────────────┐
+                  │     PUCT     │
+                  └──────┬───────┘
+                         ↓
+                     Selection
+                         ↓
+                     Expansion
+                         ↓
+                     Evaluation
+                         ↓
+                       Backup
+                         ↓
+                 Repeat simulations
+                         ↓
+                 Highest visit count
+2.
+
+day 19:
+1.                 MODEL
+                   ↓
+              GoNetwork
+                   ↓
+             NetworkEvaluator
+                   ↓
+                  MCTS
+                   ↓
+             Select Move
+                   ↓
+                GoGame
+                   ↓
+              New State
+                   ↓
+                  MCTS
+                   ↓
+                  ...
+                   ↓
+               GAME OVER
+                   ↓
+              Game Winner
+                   ↓
+          (state, policy, value)
+                   ↓
+          Self-Play Dataset
+2.        Current Model
+             ↓
+          MCTS
+             ↓
+         Self-Play
+             ↓
+      Training Examples
+             ↓
+          Dataset
+             ↓
+          Training
+             ↓
+       New Model
+3.python -c "from self_play.self_play import SelfPlay; sp=SelfPlay(board_size=12, simulations=2); data=sp.generate_games(num_games=2); print('Total examples:', len(data))"
+
+day 20:
+1.SelfPlay
+   ↓
+1000 training examples
+   ↓
+Existing Dataset / DataLoader
+   ↓
+Existing Trainer
+   ↓
+Train the neural network
+2.dir training
+3.SelfPlayDataset
+      ↓
+DataLoader
+      ↓
+Trainer.train_epoch()
+      ↓
+model(states)
+      ↓
+predicted_policy, predicted_value
+      ↓
+policy loss + value loss
+      ↓
+backpropagation
+      ↓
+updated model
+4.
+
+day 21:
+1.
+┌──────────────────────────────┐
+│       ITERATION 1            │
+│                              │
+│ Self-Play                    │
+│     ↓                        │
+│ Training Data                │
+│     ↓                        │
+│ Train Network                │
+│     ↓                        │
+│ model_iteration_1.pt         │
+└──────────────┬───────────────┘
+               ↓
+┌──────────────────────────────┐
+│       ITERATION 2            │
+│                              │
+│ Self-Play using latest model │
+│     ↓                        │
+│ Training Data                │
+│     ↓                        │
+│ Train Network                │
+│     ↓                        │
+│ model_iteration_2.pt         │
+└──────────────────────────────┘
+2.Iteration 1
+   ↓
+Generate self-play data
+   ↓
+Train
+   ↓
+model_iteration_1.pt
+        ↓
+Iteration 2
+   ↓
+Generate self-play data
+   ↓
+Train
+   ↓
+model_iteration_2.pt
+4.This tells us something important: the pipeline is running, but the network is not meaningfully learning from the current self-play data.
+
+day 22:
+1.Your policy has 145 actions:
+
+12 × 12 board = 144
+Pass = 1
+Total = 145
+
+If the target policy were uniform, each action would be approximately:
+
+1 / 145 ≈ 0.006897
+2.We don't need to change the neural network or loss function yet.We need to increase the number of MCTS simulations used to generate training data.For debugging, let's first try 20 simulations instead of 2.
+3.This confirms that increasing MCTS simulations is improving the training signal.
+4.With simulations=20, your first policy is now:
+Policy sum:       1.0
+Non-zero actions: 10
+Max probability:  0.15
+5.Compared with simulations=2:
+Non-zero actions: 2
+Max probability:  0.5
+6.You changed MCTS from:2 simulations → 20 simulations
+  and the self-play data became:Iteration 3: 867 examples
+7.The MCTS policy itself became richer, as we already confirmed:
+10 non-zero actions
+max probability = 0.15   But the training policy loss is still exactly:4.9767 for every epoch.
+8.So increasing MCTS simulations did not solve the training problem.
+9.he key point is: don't keep increasing simulations yet. The next thing to check is whether the network's policy output is actually changing during training.
+10.The fact that the policy loss is 4.9767 does not mean the policy head itself is broken. Your network is producing a probability distribution close to uniform, and the MCTS targets are sparse. We need to determine whether the gradients are actually updating the policy head.
+
+
+day 23:
+1.Today we will make sure your AlphaGo Zero loop actually works like:
+Model
+  ↓
+MCTS
+  ↓
+Self-Play
+  ↓
+Training Data
+  ↓
+Training
+  ↓
+New Model
+2.Understand the current flow :
+Your current iteration is  : model_iteration_2.pt   to   train_iteration()  to  model_iteration_3.pt
+But we want  : model_iteration_2.pt  to  Neural Network  to  MCTS  to  Self-Play  to  training data  to  Training  to model_iteration_3.pt.
+3.Your MCTS has a legacy compatibility section, so this still works, but when SelfPlay.evaluator is None, MCTS creates a new GoNetwork internally:
+4.model_iteration_3.pt
+        │
+        ▼
+   load_model()
+        │
+        ▼
+    SelfPlay
+        │
+        ▼
+      MCTS
+        │
+        ▼
+ NetworkEvaluator
+        │
+        ├── policy
+        │
+        └── value
+        │
+        ▼
+    Self-Play
+        │
+        ▼
+self_play_iteration_4.pt
+        │
+        ▼
+     Training
+        │
+        ▼
+model_iteration_4.pt
+5.
+
+day 24:
+1.emperature-Based Move Selection
+2.hat means Self-Play always chooses:highest visit count → selected move.This is too deterministic.
+AlphaGo Zero uses the MCTS visit counts to create a probability distribution:π(a) = N(a)^(1/τ) / Σ N(b)^(1/τ)
+N(a) = visit count for action a
+τ = temperature
+τ > 0
+
+3.MCTS
+ ↓
+visit-count policy
+ ↓
+temperature
+ ↓
+sample move

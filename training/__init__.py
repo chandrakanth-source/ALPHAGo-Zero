@@ -1,2 +1,3 @@
 from training.dataset import SelfPlayDataset
 from training.trainer import Trainer
+from training.checkpoint_manager import CheckpointManager
