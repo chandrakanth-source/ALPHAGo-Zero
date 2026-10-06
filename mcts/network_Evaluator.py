@@ -83,10 +83,16 @@ class NetworkEvaluator:
                 (
                     board == current_player,
                     board == -current_player,
+<<<<<<< HEAD
                     np.full(
                         board.shape,
                         current_player == 1
                     ),
+=======
+                    # Must match the training encoding in
+                    # SelfPlay.get_state: plane 2 = empty points.
+                    board == 0,
+>>>>>>> origin/shafreed
                 )
             )
 

@@ -14,7 +14,11 @@ from typing import Optional, Dict, Any, List
 
 import numpy as np
 import torch
+<<<<<<< HEAD
 from fastapi import FastAPI, HTTPException, Header, Query, Request
+=======
+from fastapi import FastAPI, HTTPException, Header, Query, Request, Response
+>>>>>>> origin/shafreed
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -583,17 +587,68 @@ def get_hint():
     _, value = evaluator.evaluate(session.game)
     current_win_prob = (value + 1.0) / 2.0
 
+<<<<<<< HEAD
     if best_action == session.game.get_pass_action():
         return {"action": "PASS", "coords": None, "win_prob": float(current_win_prob), "explanation": "Pass is the strongest strategic move here."}
+=======
+    # Move recommendation heatmap: share of MCTS root visits per candidate move
+    top_moves = []
+    root = getattr(searcher, "root", None)
+    if root is not None and root.children:
+        total = sum(ch.visit_count for ch in root.children.values()) or 1
+        for ch in root.children.values():
+            if ch.visit_count <= 0 or ch.move == session.game.get_pass_action():
+                continue
+            r, c = session.game.action_to_position(ch.move)
+            top_moves.append({"coords": [int(r), int(c)], "prob": round(ch.visit_count / total, 4)})
+        top_moves.sort(key=lambda m: m["prob"], reverse=True)
+
+    if best_action == session.game.get_pass_action():
+        return {"action": "PASS", "coords": None, "win_prob": float(current_win_prob), "top_moves": top_moves, "explanation": "Pass is the strongest strategic move here."}
+>>>>>>> origin/shafreed
     else:
         r, c = session.game.action_to_position(best_action)
         return {
             "action": f"{chr(ord('A') + c)}{r + 1}",
             "coords": [int(r), int(c)],
             "win_prob": float(current_win_prob),
+<<<<<<< HEAD
             "explanation": f"AlphaGo recommends ({chr(ord('A') + c)}{r + 1}) with {round(float(current_win_prob)*100, 1)}% win confidence."
         }
 
+=======
+            "top_moves": top_moves,
+            "explanation": f"AlphaGo recommends ({chr(ord('A') + c)}{r + 1}) with {round(float(current_win_prob)*100, 1)}% win confidence."
+        }
+
+def build_sgf(sess: "GameSession") -> str:
+    """Serialise the current game to SGF (Smart Game Format)."""
+    black_name = "Human" if sess.human_color == 1 else "AlphaGoZero"
+    white_name = "AlphaGoZero" if sess.human_color == 1 else "Human"
+    header = f"(;GM[1]FF[4]CA[UTF-8]AP[AlphaGoZero]SZ[{sess.board_size}]KM[0]PB[{black_name}]PW[{white_name}]"
+    if sess.game.game_over:
+        winner = sess.game.get_winner()
+        header += "RE[B+]" if winner == 1 else "RE[W+]" if winner == -1 else "RE[0]"
+    moves = ""
+    for m in sess.move_history:
+        tag = "B" if m["color"] == 1 else "W"
+        coords = m.get("coords")
+        pos = "" if coords is None else chr(ord("a") + coords[1]) + chr(ord("a") + coords[0])
+        moves += f";{tag}[{pos}]"
+    return header + moves + ")"
+
+@app.get("/api/export_sgf")
+def export_sgf():
+    global session
+    if not session:
+        raise HTTPException(status_code=400, detail="No active game to export.")
+    return Response(
+        content=build_sgf(session),
+        media_type="application/x-go-sgf",
+        headers={"Content-Disposition": 'attachment; filename="alphago_zero_game.sgf"'},
+    )
+
+>>>>>>> origin/shafreed
 @app.post("/api/undo")
 def undo_move():
     global session

@@ -30,7 +30,10 @@ from main import run_pipeline
 SUPER_EXPERT_STAGE_CONFIG = {
     "stage": 5,
     "name": "Super Expert Level",
+<<<<<<< HEAD
     "start_iteration": 9,
+=======
+>>>>>>> origin/shafreed
     "iterations": 2,           # Iterations 9 & 10
     "simulations": 100,         # 100 MCTS simulations per move
     "self_play_games": 1000,    # 1000 games per iteration
@@ -71,8 +74,12 @@ def run_super_expert_level_training(board_size: int = BOARD_SIZE):
             batch_size=BATCH_SIZE,
             eval_games=EVALUATION_GAMES,
             promotion_threshold=PROMOTION_THRESHOLD,
+<<<<<<< HEAD
             force_fresh=False,
             start_iteration=cfg["start_iteration"] + i - 1
+=======
+            force_fresh=False
+>>>>>>> origin/shafreed
         )
 
         elapsed_iter = time.time() - t0

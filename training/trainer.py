@@ -130,6 +130,14 @@ class Trainer:
 
             predicted_policy, predicted_value = self.model(states)
 
+<<<<<<< HEAD
+=======
+            # GoNetwork already applies softmax; calculate_loss applies
+            # log_softmax, so feed it log-probabilities (log_softmax of
+            # log-probs is the identity) instead of double-softmaxing.
+            predicted_policy = torch.log(predicted_policy.clamp_min(1e-8))
+
+>>>>>>> origin/shafreed
             loss, policy_loss, value_loss = self.calculate_loss(
                 predicted_policy,
                 predicted_value,
