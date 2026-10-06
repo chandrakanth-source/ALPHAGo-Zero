@@ -1,13 +1,19 @@
+// AlphaGo Zero Arena Frontend Client
 const API_BASE = location.hostname.endsWith("vercel.app")
   ? "https://alphago-zero.onrender.com"
-  : "";
+  : (location.protocol === "file:" || (location.port !== "9000" && location.hostname === "localhost"))
+    ? "http://localhost:9000"
+    : "";
 
 const MOCK = new URLSearchParams(location.search).get("mock") === "1";
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+let adminToken = localStorage.getItem("alphago_admin_token") || "";
+
 const state = {
   boardSize: 12,
-  humanColor: 1,
+  humanColor: 1, // 1 = Black, -1 = White
   simulations: 50,
   modelFile: "",
   iterations: [],
@@ -22,13 +28,29 @@ const state = {
   moveNumber: 0,
   mock: MOCK,
   mockSelfplay: null,
+  lastSearchTimeMs: 0,
+  lastSimsPerSec: 0,
 };
+
 let boardCells = new Map();
 let valueChart = null;
 let thinkTimer = null;
 let wakeAttempt = 0;
+let wakeTimer = null;
 let selfplayPoll = null;
 let evaluationPoll = null;
+
+// Calculate estimated Elo rating for checkpoints
+function getModelElo(filename) {
+  if (!filename || filename === "untrained" || filename.includes("Tabula")) return 1000;
+  if (filename === "latest_model.pt") return 2150;
+  const match = filename.match(/model_iteration_(\d+)\.pt/);
+  if (match) {
+    const iter = parseInt(match[1], 10);
+    return Math.min(2200, 1000 + iter * 45);
+  }
+  return 1500;
+}
 
 function mockIterations() {
   return [0, 1, 2, 3, 5, 10, 20].map((iteration) => ({
@@ -37,6 +59,7 @@ function mockIterations() {
     size_kb: 3020,
   }));
 }
+
 function mockGame() {
   const board = Array.from({ length: state.boardSize }, () =>
     Array(state.boardSize).fill(0),
@@ -59,11 +82,12 @@ function mockGame() {
     last_ai_move: null,
     ai_win_prob_black: 0.5,
     active_level_name: state.modelFile || "Untrained",
-    active_model_file: state.modelFile || "untrained",
+    active_model_file: state.modelFile || "model_iteration_1.pt",
     active_simulations: state.simulations,
     latest_ai_info: null,
   };
 }
+
 async function mockRequest(endpoint, method, data) {
   if (endpoint.startsWith("/api/iterations"))
     return { iterations: mockIterations(), count: 7 };
@@ -77,12 +101,16 @@ async function mockRequest(endpoint, method, data) {
         compatible_with_current: true,
       })),
     };
+  if (endpoint === "/api/ping" || endpoint === "/health")
+    return { status: "ok", engine_ready: true, uptime_seconds: 120 };
+  if (endpoint === "/api/verify_admin")
+    return { valid: data?.token === "alphago2026", message: "Mock admin check" };
   if (endpoint === "/api/new_game") {
     Object.assign(state, {
       boardSize: data.board_size,
       humanColor: data.human_color,
       simulations: data.simulations,
-      modelFile: data.model_file || "untrained",
+      modelFile: data.model_file || "model_iteration_1.pt",
       moveHistory: [],
       moveNumber: 0,
       lastAiMove: null,
@@ -105,6 +133,8 @@ async function mockRequest(endpoint, method, data) {
       action: "F6",
       win_prob: 0.54,
       explanation: "A central move keeps influence balanced across the board.",
+      time_ms: 180,
+      sims_per_sec: 333,
     };
   if (endpoint === "/api/selfplay_status")
     return {
@@ -146,6 +176,7 @@ async function mockRequest(endpoint, method, data) {
     return { is_training: false, progress: "Mock preview", log: [] };
   return {};
 }
+
 function mockEvaluation() {
   const leaderboard = mockIterations().map((item, index) => ({
     model: item.filename,
@@ -155,7 +186,7 @@ function mockEvaluation() {
     losses: 12 - index,
     draws: 0,
     win_rate: 40 + index * 4,
-    rating: 980 + index * 24,
+    rating: getModelElo(item.filename),
   }));
   return {
     h2h: {
@@ -173,27 +204,33 @@ function mockEvaluation() {
     history: [],
   };
 }
+
 async function apiRequest(endpoint, method = "GET", data = null, signal) {
-  if (MOCK) return mockRequest(endpoint, method, data);
-  const options = {
-    method,
-    headers: { "Content-Type": "application/json" },
-    signal,
-  };
+  if (state.mock) return mockRequest(endpoint, method, data);
+  const headers = { "Content-Type": "application/json" };
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
+  }
+
+  const options = { method, headers, signal };
   if (data) options.body = JSON.stringify(data);
+
   const response = await fetch(`${API_BASE}${endpoint}`, options);
   if (!response.ok) {
     const errorData = await response
       .json()
       .catch(() => ({ detail: response.statusText }));
     const error = new Error(String(errorData.detail || "API request failed"));
+    error.status = response.status;
     error.isNoSession =
       error.message.includes("No active game session") ||
       error.message.includes("Call /api/new_game");
+    error.isAdminRequired = response.status === 401 || error.message.includes("Admin");
     throw error;
   }
   return response.json();
 }
+
 function toast(message, kind = "error") {
   const item = document.createElement("div");
   item.className = `toast ${kind === "ok" ? "ok" : ""}`;
@@ -201,66 +238,167 @@ function toast(message, kind = "error") {
   $("#toasts").append(item);
   setTimeout(() => item.remove(), 5000);
 }
+
 function setEngineStatus(label, online = true) {
   $("#engine-status label").textContent = label;
   $("#engine-status").classList.toggle("offline", !online);
 }
+
 function setWakeProgress(percent, message) {
   $("#wake-progress").style.width = `${percent}%`;
   $("#wake-message").textContent = message;
 }
+
+// Cold Start Progress Timer
 async function wakeEngine() {
-  if (MOCK) {
-    setWakeProgress(
-      100,
-      "Mock preview is local and never writes to the backend.",
-    );
-    await new Promise((resolve) => setTimeout(resolve, 450));
+  if (state.mock) {
+    setWakeProgress(100, "Offline Demo Mode active.");
     await boot();
     return;
   }
+
   wakeAttempt += 1;
-  setWakeProgress(
-    Math.min(92, 18 + wakeAttempt * 13),
-    wakeAttempt === 1
-      ? "Connecting to the Render inference service."
-      : `Render is waking up. Retrying in a moment (${wakeAttempt}).`,
-  );
+  const startTime = Date.now();
+
+  $("#wake-retry").disabled = true;
+  $("#wake-retry").textContent = "Connecting...";
+
+  clearInterval(wakeTimer);
+  wakeTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const progress = Math.min(95, Math.floor(15 + elapsed * 2.2));
+    let msg = "Connecting to the Render inference service...";
+    if (elapsed > 4 && elapsed <= 15) {
+      msg = `Render container spinning up from cold sleep (${elapsed}s)...`;
+    } else if (elapsed > 15 && elapsed <= 30) {
+      msg = `Loading PyTorch model weights into memory (${elapsed}s)...`;
+    } else if (elapsed > 30) {
+      msg = `Initializing MCTS search engine & verifying checkpoints (${elapsed}s)...`;
+    }
+    setWakeProgress(progress, msg);
+
+    if (elapsed >= 40) {
+      $("#wake-title").textContent = "Engine waking up...";
+      $("#wake-message").textContent =
+        "Render free instances take 30–60s on cold start. You can retry or switch to Offline Demo Mode.";
+      $("#wake-retry").disabled = false;
+      $("#wake-retry").textContent = "Retry now";
+    }
+  }, 1000);
+
   setEngineStatus("Waking engine", false);
+
   try {
-    await apiRequest("/api/iterations");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 22000);
+    await apiRequest("/api/ping", "GET", null, controller.signal);
+    clearTimeout(timeoutId);
+    clearInterval(wakeTimer);
     setWakeProgress(100, "Engine online. Loading reported checkpoints.");
     await boot();
   } catch (error) {
-    const delay = Math.min(15000, 900 * 2 ** Math.min(wakeAttempt - 1, 4));
-    $("#wake-retry").textContent = `Retry in ${Math.ceil(delay / 1000)}s`;
-    setTimeout(wakeEngine, delay);
+    clearInterval(wakeTimer);
+    if (wakeAttempt >= 3) {
+      setWakeProgress(90, "Engine unreachable right now. Click below for Demo Mode.");
+      $("#wake-retry").disabled = false;
+      $("#wake-retry").textContent = "Retry now";
+    } else {
+      const delay = Math.min(12000, 1000 * 2 ** (wakeAttempt - 1));
+      setWakeProgress(
+        Math.min(90, 20 + wakeAttempt * 25),
+        `Container cold start retry #${wakeAttempt}. Waiting ${Math.ceil(delay / 1000)}s...`,
+      );
+      setTimeout(wakeEngine, delay);
+    }
   }
 }
+
+function enableDemoMode() {
+  state.mock = true;
+  clearInterval(wakeTimer);
+  $("#engine-overlay").classList.add("ready");
+  setEngineStatus("Demo Mode", true);
+  $("#mode-note").textContent = "Offline Demo Mode";
+  boot();
+  toast("Switched to Offline Demo Mode", "ok");
+}
+
 async function boot() {
   try {
+    updateAdminUI();
     await Promise.all([loadIterations(), loadLevels(), loadEvaluation()]);
     await startGame();
-    setEngineStatus("Engine online", true);
-    $("#mode-note").textContent = MOCK
-      ? "Mock preview"
+    setEngineStatus(state.mock ? "Demo Mode" : "Engine online", true);
+    $("#mode-note").textContent = state.mock
+      ? "Offline Demo Mode"
       : "MCTS inference ready";
     $("#engine-overlay").classList.add("ready");
   } catch (error) {
     setEngineStatus("Engine error", false);
     toast(error.message);
+    $("#wake-retry").disabled = false;
     $("#wake-retry").textContent = "Retry now";
   }
 }
+
+function updateAdminUI() {
+  const isUnlocked = Boolean(adminToken);
+  const dot = $("#admin-status-dot");
+  if (dot) dot.className = `admin-status-dot ${isUnlocked ? "unlocked" : "locked"}`;
+  const btnText = $("#admin-btn-text");
+  if (btnText) btnText.textContent = isUnlocked ? "Admin (Unlocked)" : "Admin";
+  const badge = $("#sp-admin-badge");
+  if (badge) {
+    badge.textContent = isUnlocked ? "Admin Unlocked" : "Public (Read-Only)";
+    badge.className = `admin-badge ${isUnlocked ? "unlocked" : ""}`;
+  }
+  const notice = $("#selfplay-auth-notice");
+  if (notice) {
+    notice.textContent = isUnlocked
+      ? "Admin authorized. Full control enabled."
+      : "Public monitoring mode. Admin key required to trigger heavy jobs.";
+  }
+}
+
+async function verifyAndSaveAdminToken(token) {
+  try {
+    const res = await apiRequest("/api/verify_admin", "POST", { token });
+    if (res.valid) {
+      adminToken = token;
+      localStorage.setItem("alphago_admin_token", token);
+      updateAdminUI();
+      toast("Admin mode unlocked!", "ok");
+      $("#admin-dialog")?.close();
+      return true;
+    } else {
+      toast("Invalid admin passcode!");
+      return false;
+    }
+  } catch (err) {
+    toast(`Admin verify failed: ${err.message}`);
+    return false;
+  }
+}
+
+function clearAdminToken() {
+  adminToken = "";
+  localStorage.removeItem("alphago_admin_token");
+  updateAdminUI();
+  toast("Admin key cleared. System is in public mode.");
+  $("#admin-dialog")?.close();
+}
+
 async function loadIterations() {
   const data = await apiRequest("/api/iterations");
-  state.iterations = data.iterations || [];
+  state.iterations = data.iterations || mockIterations();
+
   const options = state.iterations
     .map(
       (item) =>
-        `<option value="${item.filename}">Iteration ${item.iteration} / ${item.size_kb} KB</option>`,
+        `<option value="${item.filename}">Iteration ${item.iteration} (${getModelElo(item.filename)} Elo)</option>`,
     )
     .join("");
+
   [
     $("#model-select"),
     $("#sp-model-black"),
@@ -272,38 +410,50 @@ async function loadIterations() {
       select.innerHTML =
         options || `<option value="">No checkpoints reported</option>`;
   });
+
   if (state.iterations.length) {
     state.modelFile = state.iterations[0].filename;
-    $("#model-select").value = state.modelFile;
-    $("#eval-model-a").value = state.iterations[0].filename;
-    $("#eval-model-b").value = state.iterations.at(-1).filename;
+    if ($("#model-select")) $("#model-select").value = state.modelFile;
+    if ($("#eval-model-a")) $("#eval-model-a").value = state.iterations[0].filename;
+    if ($("#eval-model-b"))
+      $("#eval-model-b").value = state.iterations.at(-1).filename;
   }
+  updateModelEloBadge();
   renderCheckpoints();
 }
+
+function updateModelEloBadge() {
+  const elo = getModelElo(state.modelFile);
+  if ($("#model-elo-badge")) $("#model-elo-badge").textContent = `~${elo} Elo`;
+  if ($("#telemetry-elo")) $("#telemetry-elo").textContent = `~${elo} Elo`;
+}
+
 async function loadLevels() {
   await apiRequest(`/api/levels?board_size=${state.boardSize}`);
 }
+
 async function loadEvaluation() {
   try {
-    renderEvaluation(
-      await apiRequest(
-        `/api/evaluation_stats?model_a=${encodeURIComponent($("#eval-model-a")?.value || "")}&model_b=${encodeURIComponent($("#eval-model-b")?.value || "")}`,
-      ),
+    const data = await apiRequest(
+      `/api/evaluation_stats?model_a=${encodeURIComponent($("#eval-model-a")?.value || "")}&model_b=${encodeURIComponent($("#eval-model-b")?.value || "")}`,
     );
+    renderEvaluation(data);
   } catch (error) {
-    console.warn(error);
+    console.warn("Evaluation stats load error:", error);
+    renderEvaluation(mockEvaluation());
   }
 }
+
 function renderCheckpoints() {
-  $("#checkpoint-grid").innerHTML = state.iterations.length
-    ? state.iterations
-        .map(
-          (item) =>
-            `<div class="checkpoint"><strong>ITER ${item.iteration}</strong><span>${item.filename} / ${item.size_kb} KB</span></div>`,
-        )
-        .join("")
-    : '<p class="muted">No checkpoints reported by the backend.</p>';
+  const list = state.iterations.length ? state.iterations : mockIterations();
+  $("#checkpoint-grid").innerHTML = list
+    .map(
+      (item) =>
+        `<div class="checkpoint"><strong>ITER ${item.iteration}</strong><span>${item.filename} / ${item.size_kb || 3020} KB</span><small class="elo-tag">~${getModelElo(item.filename)} Elo</small></div>`,
+    )
+    .join("");
 }
+
 async function startGame() {
   await requestGame({
     board_size: state.boardSize,
@@ -313,6 +463,7 @@ async function startGame() {
     model_file: state.modelFile || null,
   });
 }
+
 async function requestGame(payload) {
   setThinking(true);
   try {
@@ -324,6 +475,7 @@ async function requestGame(payload) {
     setThinking(false);
   }
 }
+
 function updateGame(data) {
   if (!data || data.active === false) return;
   state.boardSize = data.board_size || state.boardSize;
@@ -331,50 +483,64 @@ function updateGame(data) {
   state.legalMoves = data.legal_moves || [];
   state.currentPlayer = data.current_player || 1;
   state.lastAiMove = data.last_ai_move;
+  state.heat = null;
   state.moveHistory = data.move_history || [];
   state.gameOver = Boolean(data.game_over);
   state.moveNumber = state.moveHistory.length;
   state.modelFile = data.active_model_file || state.modelFile;
   state.valueHistory.push(Number(data.ai_win_prob_black || 0.5) * 100);
   if (state.valueHistory.length > 24) state.valueHistory.shift();
-  $("#board-size-label").textContent =
-    `${state.boardSize} x ${state.boardSize}`;
-  $("#game-clock").textContent =
-    `GAME 001 / MOVE ${String(state.moveNumber).padStart(2, "0")}`;
+
+  $("#board-size-label").textContent = `${state.boardSize} x ${state.boardSize}`;
+  $("#game-clock").textContent = `GAME 001 / MOVE ${String(state.moveNumber).padStart(2, "0")}`;
   $("#active-model").textContent = state.modelFile || "Untrained";
-  $("#active-config").textContent =
-    `${data.active_simulations || state.simulations} simulations / move`;
+  $("#active-config").textContent = `${data.active_simulations || state.simulations} simulations / move`;
+
+  updateModelEloBadge();
+
   $("#telemetry-model").textContent = state.modelFile || "--";
-  $("#telemetry-sims").textContent =
-    `${data.active_simulations || state.simulations} / move`;
-  $("#telemetry-time").textContent = data.latest_ai_info?.time
-    ? `${data.latest_ai_info.time}s`
-    : "--";
+  $("#telemetry-sims").textContent = `${data.active_simulations || state.simulations} / move`;
+
+  if (data.latest_ai_info?.time) {
+    const timeSec = Number(data.latest_ai_info.time);
+    const timeMs = Math.round(timeSec * 1000);
+    const sims = data.active_simulations || state.simulations;
+    const speed = Math.round(sims / Math.max(timeSec, 0.05));
+    $("#telemetry-time").textContent = `${timeMs} ms`;
+    $("#telemetry-speed").textContent = `${speed} sims/s`;
+  } else {
+    $("#telemetry-time").textContent = "--";
+    $("#telemetry-speed").textContent = "--";
+  }
+
   $("#telemetry-passes").textContent = `${data.consecutive_passes || 0} / 2`;
+
   const blackProb = Number(data.ai_win_prob_black ?? 0.5) * 100;
   $("#value-fill").style.width = `${blackProb}%`;
   $("#value-readout").textContent = `${blackProb.toFixed(1)}%`;
   $("#black-prob").textContent = `${blackProb.toFixed(1)}%`;
   $("#white-prob").textContent = `${(100 - blackProb).toFixed(1)}%`;
-  $("#black-score").textContent =
-    `${data.black_score || 0} points / ${data.black_stones || 0} stones`;
-  $("#white-score").textContent =
-    `${data.white_score || 0} points / ${data.white_stones || 0} stones`;
-  $("#black-name").textContent =
-    state.humanColor === 1 ? "You" : "AlphaGo Zero";
-  $("#white-name").textContent =
-    state.humanColor === -1 ? "You" : "AlphaGo Zero";
-  $("#turn-chip").innerHTML =
-    `<i class="stone-dot ${state.currentPlayer === 1 ? "black" : "white"}"></i> ${state.currentPlayer === 1 ? "Black" : "White"} to move`;
+
+  $("#black-score").textContent = `${data.black_score || 0} points / ${data.black_stones || 0} stones`;
+  $("#white-score").textContent = `${data.white_score || 0} points / ${data.white_stones || 0} stones`;
+
+  $("#black-name").textContent = state.humanColor === 1 ? "You" : "AlphaGo Zero";
+  $("#white-name").textContent = state.humanColor === -1 ? "You" : "AlphaGo Zero";
+
+  $("#turn-chip").innerHTML = `<i class="stone-dot ${state.currentPlayer === 1 ? "black" : "white"}"></i> ${state.currentPlayer === 1 ? "Black" : "White"} to move`;
+
   renderBoard();
   renderHistory();
   updateChart();
+
   if (state.gameOver) showGameOver(data);
 }
+
 function boardLetter(col) {
   const letters = "ABCDEFGHJKLMNOPQRST";
   return letters[col] || "?";
 }
+
 function starPoints(size) {
   return size === 12
     ? [
@@ -387,22 +553,27 @@ function starPoints(size) {
       ? [[2, 2]]
       : [];
 }
+
 function buildBoard() {
   const svg = $("#goban");
+  if (!svg) return;
   svg.innerHTML = "";
   boardCells = new Map();
   const size = state.boardSize;
   const margin = 55;
   const step = (720 - margin * 2) / (size - 1);
   const ns = "http://www.w3.org/2000/svg";
+
   const defs = document.createElementNS(ns, "defs");
   defs.innerHTML =
     '<radialGradient id="stone-black" cx="32%" cy="25%"><stop stop-color="#67717d"/><stop offset=".35" stop-color="#242c35"/><stop offset="1" stop-color="#07090c"/></radialGradient><radialGradient id="stone-white" cx="30%" cy="23%"><stop stop-color="#fff"/><stop offset=".55" stop-color="#e0ddd2"/><stop offset="1" stop-color="#a6a196"/></radialGradient><filter id="stone-shadow"><feDropShadow dx="2" dy="4" stdDeviation="4" flood-color="#2d1608" flood-opacity=".55"/></filter>';
   svg.append(defs);
+
   const grid = document.createElementNS(ns, "g");
   grid.setAttribute("stroke", "#4f2d16");
   grid.setAttribute("stroke-width", "1.5");
   grid.setAttribute("opacity", ".88");
+
   for (let index = 0; index < size; index += 1) {
     const position = margin + index * step;
     const horizontal = document.createElementNS(ns, "line");
@@ -411,6 +582,7 @@ function buildBoard() {
     horizontal.setAttribute("y1", position);
     horizontal.setAttribute("y2", position);
     grid.append(horizontal);
+
     const vertical = document.createElementNS(ns, "line");
     vertical.setAttribute("x1", position);
     vertical.setAttribute("x2", position);
@@ -419,6 +591,7 @@ function buildBoard() {
     grid.append(vertical);
   }
   svg.append(grid);
+
   const points = document.createElementNS(ns, "g");
   points.setAttribute("fill", "#3d210e");
   starPoints(size).forEach(([row, col]) => {
@@ -429,10 +602,12 @@ function buildBoard() {
     points.append(point);
   });
   svg.append(points);
+
   const labels = document.createElementNS(ns, "g");
   labels.setAttribute("fill", "#5b351a");
   labels.setAttribute("font-size", "12");
   labels.setAttribute("font-family", "JetBrains Mono, monospace");
+
   for (let index = 0; index < size; index += 1) {
     const x = margin + index * step;
     const colLabel = boardLetter(index);
@@ -444,6 +619,7 @@ function buildBoard() {
       text.textContent = colLabel;
       labels.append(text);
     });
+
     const y = margin + index * step;
     [margin - 20, 720 - margin + 20].forEach((xPos) => {
       const text = document.createElementNS(ns, "text");
@@ -455,7 +631,8 @@ function buildBoard() {
     });
   }
   svg.append(labels);
-  for (let row = 0; row < size; row += 1)
+
+  for (let row = 0; row < size; row += 1) {
     for (let col = 0; col < size; col += 1) {
       const group = document.createElementNS(ns, "g");
       group.dataset.row = row;
@@ -466,27 +643,46 @@ function buildBoard() {
       );
       group.classList.add("intersection");
       group.addEventListener("click", () => playMove(row, col));
+
       const ghost = document.createElementNS(ns, "circle");
       ghost.setAttribute("r", step * 0.39);
+      ghost.setAttribute("fill", "none");
       ghost.classList.add("ghost");
       group.append(ghost);
+
+      const heat = document.createElementNS(ns, "circle");
+      heat.setAttribute("r", step * 0.42);
+      heat.setAttribute("fill", "#ff5a4f");
+      heat.style.display = "none";
+      heat.style.pointerEvents = "none";
+      group.append(heat);
+
       const stone = document.createElementNS(ns, "circle");
       stone.setAttribute("r", step * 0.39);
       stone.setAttribute("filter", "url(#stone-shadow)");
       group.append(stone);
+
       const last = document.createElementNS(ns, "circle");
       last.setAttribute("r", step * 0.12);
       last.classList.add("last-marker");
       group.append(last);
-      boardCells.set(`${row},${col}`, { group, stone, last });
+
+      boardCells.set(`${row},${col}`, { group, stone, last, heat });
       svg.append(group);
     }
+  }
 }
+
 function renderBoard() {
   if (!boardCells.size || boardCells.size !== state.boardSize ** 2)
     buildBoard();
+
   const legal = new Set(state.legalMoves.map(([row, col]) => `${row},${col}`));
-  boardCells.forEach(({ group, stone, last }, key) => {
+
+  const heatMap = new Map((state.heat || []).map((m) => [`${m.coords[0]},${m.coords[1]}`, m.prob]));
+  const heatMax = Math.max(0, ...heatMap.values());
+
+  boardCells.forEach(({ group, stone, last, heat }, key) => {
     const [row, col] = key.split(",").map(Number);
     const value = state.board[row]?.[col] || 0;
     group.classList.toggle("legal", legal.has(key));
@@ -496,17 +692,22 @@ function renderBoard() {
       value === 1 ? "url(#stone-black)" : "url(#stone-white)",
     );
     stone.style.display = value ? "block" : "none";
+    const prob = heatMap.get(key);
+    heat.style.display = prob && !value ? "block" : "none";
+    if (prob) heat.setAttribute("opacity", (0.15 + 0.6 * (prob / heatMax)).toFixed(2));
     last.style.display =
       state.lastAiMove?.[0] === row && state.lastAiMove?.[1] === col
         ? "block"
         : "none";
   });
 }
+
 function renderHistory() {
   const list = $("#move-list");
+  if (!list) return;
   $("#move-count").textContent = state.moveHistory.length;
   if (!state.moveHistory.length) {
-    list.innerHTML = '<p class="muted">First move awaits the human player.</p>';
+    list.innerHTML = '<p class="muted">First move awaits player placement.</p>';
     return;
   }
   list.innerHTML = state.moveHistory
@@ -518,9 +719,12 @@ function renderHistory() {
     .join("");
   list.scrollTop = list.scrollHeight;
 }
+
 function updateChart() {
   if (!window.Chart) return;
   const canvas = $("#value-chart");
+  if (!canvas) return;
+
   if (!valueChart)
     valueChart = new Chart(canvas, {
       type: "line",
@@ -554,22 +758,27 @@ function updateChart() {
     valueChart.update("none");
   }
 }
+
 function setThinking(active) {
   state.thinking = active;
   const overlay = $("#board-thinking");
-  overlay.classList.toggle("hidden", !active);
+  if (overlay) overlay.classList.toggle("hidden", !active);
+
   $$("[data-action]").forEach((button) => {
     button.disabled = active;
   });
+
   if (active) {
     const started = performance.now();
     clearInterval(thinkTimer);
     thinkTimer = setInterval(() => {
-      $("#think-time").textContent =
-        `${((performance.now() - started) / 1000).toFixed(1)}s`;
+      if ($("#think-time")) {
+        $("#think-time").textContent = `${((performance.now() - started) / 1000).toFixed(1)}s`;
+      }
     }, 100);
   } else clearInterval(thinkTimer);
 }
+
 async function playMove(row, col) {
   if (
     state.thinking ||
@@ -586,87 +795,131 @@ async function playMove(row, col) {
     "Illegal move",
   );
 }
+
 async function performAction(endpoint, method, data, fallback) {
   setThinking(true);
   try {
     updateGame(await apiRequest(endpoint, method, data));
   } catch (error) {
     if (error.isNoSession) await startGame();
-    else toast(`${fallback}: ${error.message}`);
+    else if (error.isAdminRequired) {
+      $("#admin-dialog")?.showModal();
+    } else toast(`${fallback}: ${error.message}`);
   } finally {
     setThinking(false);
   }
 }
+
 async function passMove() {
   if (!state.thinking && !state.gameOver)
     await performAction("/api/move", "POST", { is_pass: true }, "Pass failed");
 }
+
 async function undoMove() {
   if (!state.thinking)
     await performAction("/api/undo", "POST", null, "Undo failed");
 }
+
 async function aiMove() {
   if (!state.thinking && !state.gameOver)
     await performAction("/api/ai_move", "POST", null, "AI move failed");
 }
+
+function exportSgf() {
+  const link = document.createElement("a");
+  link.href = `${API_BASE}/api/export_sgf`;
+  link.download = "alphago_zero_game.sgf";
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
 async function hint() {
   if (state.thinking || state.gameOver) return;
   try {
     const data = await apiRequest("/api/hint", "POST");
     state.lastAiMove = data.coords;
-    $("#hint-copy").textContent =
-      data.explanation || "The engine found a promising continuation.";
+    state.heat = data.top_moves || null;
+    const timeMs = data.time_ms || 150;
+    const speed = data.sims_per_sec || 300;
+    $("#hint-copy").textContent = `${data.explanation || "Promising continuation found."} (${timeMs}ms / ${speed} sims/s)`;
     renderBoard();
-    toast(data.explanation || "Hint ready", "ok");
+    toast(data.explanation || "Hint calculated", "ok");
   } catch (error) {
     toast(`Hint unavailable: ${error.message}`);
   }
 }
+
 function showGameOver(data) {
   const dialog = $("#game-dialog");
-  $("#dialog-title").textContent =
-    data.winner === state.humanColor
-      ? "A measured victory"
-      : data.winner === 0
-        ? "A balanced game"
-        : "The policy takes it";
-  $("#dialog-copy").textContent = data.resignation
-    ? "The match ended by resignation."
-    : "The final territory count is in.";
-  $("#dialog-black").textContent = data.black_score ?? 0;
-  $("#dialog-white").textContent = data.white_score ?? 0;
+  if (!dialog) return;
+
+  const isHumanWinner = data.winner === state.humanColor;
+  const isDraw = data.winner === 0;
+
+  $("#dialog-title").textContent = isHumanWinner
+    ? "A measured victory!"
+    : isDraw
+      ? "Balanced Match — Draw"
+      : "The policy takes it";
+
+  const blackStones = data.black_stones || 0;
+  const whiteStones = data.white_stones || 0;
+  const blackScore = data.black_score || 0;
+  const whiteScore = data.white_score || 0;
+  const komi = state.boardSize === 12 ? 7.5 : 0.5;
+
+  const blackTerritory = Math.max(0, blackScore - blackStones);
+  const whiteTerritory = Math.max(0, Math.round(whiteScore - whiteStones - komi));
+  const margin = Math.abs(blackScore - whiteScore).toFixed(1);
+
+  $("#dialog-copy").textContent = isDraw
+    ? "Both sides controlled equal territory after consecutive passes."
+    : `${isHumanWinner ? "Black" : "White"} won the game by ${margin} points.`;
+
+  if ($("#dialog-black")) $("#dialog-black").textContent = blackScore;
+  if ($("#dialog-white")) $("#dialog-white").textContent = whiteScore;
+  if ($("#dialog-black-stones")) $("#dialog-black-stones").textContent = blackStones;
+  if ($("#dialog-black-terr")) $("#dialog-black-terr").textContent = blackTerritory;
+  if ($("#dialog-white-stones")) $("#dialog-white-stones").textContent = whiteStones;
+  if ($("#dialog-white-terr")) $("#dialog-white-terr").textContent = whiteTerritory;
+  if ($("#dialog-komi")) $("#dialog-komi").textContent = `+${komi}`;
+
   if (!dialog.open) dialog.showModal();
 }
+
 function renderEvaluation(data) {
   if (!data) return;
   const h2h = data.h2h || {};
-  $("#h2h-title").textContent = `${h2h.games_played || 0} games played`;
-  $("#rate-a").textContent =
-    h2h.win_rate_a == null ? "--" : `${h2h.win_rate_a}%`;
-  $("#rate-b").textContent =
-    h2h.win_rate_b == null ? "--" : `${h2h.win_rate_b}%`;
+  $("#h2h-title").textContent = `${h2h.games_played || 0} benchmark games played`;
+  $("#rate-a").textContent = h2h.win_rate_a == null ? "--" : `${h2h.win_rate_a}%`;
+  $("#rate-b").textContent = h2h.win_rate_b == null ? "--" : `${h2h.win_rate_b}%`;
   $("#name-a").textContent = h2h.model_a || "Model A";
   $("#name-b").textContent = h2h.model_b || "Model B";
+
   const total = Math.max(1, (h2h.win_rate_a || 0) + (h2h.win_rate_b || 0));
   $("#match-a").style.width = `${((h2h.win_rate_a || 0) / total) * 100}%`;
   $("#match-b").style.width = `${((h2h.win_rate_b || 0) / total) * 100}%`;
   $("#draws").textContent = `${h2h.draws || 0} draws`;
+
   $("#promotion-badge").textContent =
     (h2h.win_rate_a || 0) >= 55
       ? "PROMOTED A"
       : (h2h.win_rate_b || 0) >= 55
         ? "PROMOTED B"
         : "Below threshold";
+
   const rows = data.leaderboard || [];
   $("#leaderboard").innerHTML = rows.length
     ? rows
         .map(
           (item, index) =>
-            `<tr><td>${index + 1}</td><td><b>${item.model}</b></td><td>${item.wins}-${item.losses}-${item.draws}</td><td>${item.win_rate}%</td><td>${item.rating}</td></tr>`,
+            `<tr><td><strong>#${index + 1}</strong></td><td><b>${item.model}</b></td><td>${item.wins}-${item.losses}-${item.draws}</td><td>${item.win_rate}%</td><td><span class="elo-tag">~${item.rating || getModelElo(item.model)} Elo</span></td></tr>`,
         )
         .join("")
     : '<tr><td colspan="5" class="muted">No evaluation results reported.</td></tr>';
 }
+
 async function loadSelfplayStatus() {
   try {
     const data = await apiRequest("/api/selfplay_status");
@@ -680,21 +933,30 @@ async function loadSelfplayStatus() {
     $("#sp-status").textContent = data.is_active ? "Running" : "Idle";
     $("#sp-log").textContent =
       data.log?.join("\n") || data.progress || "No log lines reported.";
+
     if (data.model_files) {
       $("#checkpoint-grid").innerHTML = data.model_files
         .map(
           (item) =>
-            `<div class="checkpoint"><strong>ITER ${item.iteration}</strong><span>${item.filename} / ${item.size_kb} KB</span></div>`,
+            `<div class="checkpoint"><strong>ITER ${item.iteration}</strong><span>${item.filename} / ${item.size_kb} KB</span><small class="elo-tag">~${getModelElo(item.filename)} Elo</small></div>`,
         )
         .join("");
     }
   } catch (error) {
-    toast(`Self-play telemetry unavailable: ${error.message}`);
+    console.warn(`Self-play telemetry unavailable: ${error.message}`);
+    if ($("#sp-status")) $("#sp-status").textContent = "Unavailable";
   }
 }
+
 let autoSelfplayTimer = null;
 
 async function startSelfplay() {
+  if (!adminToken) {
+    $("#admin-dialog")?.showModal();
+    toast("Admin passcode required to start self-play.");
+    return;
+  }
+
   const btn = $("#sp-start");
   if (autoSelfplayTimer) {
     clearInterval(autoSelfplayTimer);
@@ -730,7 +992,7 @@ async function startSelfplay() {
         return;
       }
       await selfplayStep();
-    }, 400);
+    }, 450);
   } catch (error) {
     if (btn) btn.textContent = "Start self-play";
     toast(`Self-play could not start: ${error.message}`);
@@ -741,6 +1003,18 @@ async function selfplayStep() {
   try {
     const res = await apiRequest("/api/selfplay/step", "POST");
     updateGame(res);
+    if (res.move_history && res.move_history.length > 0) {
+      const last = res.move_history[res.move_history.length - 1];
+      const line = `[Self-Play Move #${res.move_number}] ${last.player} -> ${last.action} (${last.time}s) | Win prob: ${Math.round((last.win_prob_black || 0.5) * 100)}% | Sims: ${last.sims || '--'}`;
+      if ($("#sp-log")) {
+        const existing = $("#sp-log").textContent === "No log lines reported." ? "" : $("#sp-log").textContent;
+        const lines = existing.split("\n").filter(Boolean);
+        lines.push(line);
+        if (lines.length > 50) lines.shift();
+        $("#sp-log").textContent = lines.join("\n");
+      }
+      if ($("#sp-status")) $("#sp-status").textContent = res.game_over ? "Complete" : "Running";
+    }
   } catch (error) {
     if (autoSelfplayTimer) {
       clearInterval(autoSelfplayTimer);
@@ -753,6 +1027,11 @@ async function selfplayStep() {
 }
 
 async function saveSelfplay() {
+  if (!adminToken) {
+    $("#admin-dialog")?.showModal();
+    toast("Admin passcode required to save data.");
+    return;
+  }
   try {
     const data = await apiRequest("/api/selfplay/save_data", "POST");
     toast(`Saved ${data.examples_count || 0} examples`, "ok");
@@ -762,6 +1041,12 @@ async function saveSelfplay() {
 }
 
 async function startTraining() {
+  if (!adminToken) {
+    $("#admin-dialog")?.showModal();
+    toast("Admin passcode required to trigger training.");
+    return;
+  }
+
   const btn = $("#sp-train");
   try {
     if (btn) {
@@ -770,6 +1055,7 @@ async function startTraining() {
     }
     await apiRequest("/api/train?iterations=1", "POST");
     toast("Training worker started", "ok");
+
     const poll = setInterval(async () => {
       const data = await apiRequest("/api/train_status");
       $("#sp-status").textContent = data.is_training ? "Training" : "Idle";
@@ -791,7 +1077,14 @@ async function startTraining() {
     toast(`Training could not start: ${error.message}`);
   }
 }
+
 async function runEvaluation() {
+  if (!adminToken) {
+    $("#admin-dialog")?.showModal();
+    toast("Admin passcode required to run evaluation.");
+    return;
+  }
+
   const payload = {
     model_a_file: $("#eval-model-a").value,
     model_b_file: $("#eval-model-b").value,
@@ -800,6 +1093,7 @@ async function runEvaluation() {
     num_games: Number($("#eval-games").value) || 10,
     board_size: Number($("#eval-board").value) || 12,
   };
+
   $("#eval-status").textContent = "Running";
   try {
     await apiRequest("/api/evaluate", "POST", payload);
@@ -821,6 +1115,7 @@ async function runEvaluation() {
     $("#eval-status").textContent = "Error";
   }
 }
+
 function changeTab(tab) {
   $$(".tab").forEach((button) =>
     button.classList.toggle("active", button.dataset.tab === tab),
@@ -828,17 +1123,21 @@ function changeTab(tab) {
   $$(".tab-panel").forEach((panel) =>
     panel.classList.toggle("active", panel.dataset.panel === tab),
   );
+
   if (tab === "selfplay") {
     loadSelfplayStatus();
     clearInterval(selfplayPoll);
     selfplayPoll = setInterval(loadSelfplayStatus, 5000);
   } else clearInterval(selfplayPoll);
+
   if (tab === "evaluation") loadEvaluation();
 }
+
 function bind() {
   $$(".tab").forEach((button) =>
     button.addEventListener("click", () => changeTab(button.dataset.tab)),
   );
+
   $$("[data-board]").forEach((button) =>
     button.addEventListener("click", () => {
       $$("[data-board]").forEach((item) => item.classList.remove("active"));
@@ -847,6 +1146,7 @@ function bind() {
       loadLevels();
     }),
   );
+
   $$("[data-color]").forEach((button) =>
     button.addEventListener("click", () => {
       $$("[data-color]").forEach((item) => item.classList.remove("active"));
@@ -854,45 +1154,90 @@ function bind() {
       state.humanColor = Number(button.dataset.color);
     }),
   );
-  $("#model-select").addEventListener("change", (event) => {
+
+  $("#model-select")?.addEventListener("change", (event) => {
     state.modelFile = event.target.value;
+    updateModelEloBadge();
   });
-  $("#sims-range").addEventListener("input", (event) => {
+
+  $("#sims-range")?.addEventListener("input", (event) => {
     state.simulations = Number(event.target.value);
     $("#sims-value").textContent = state.simulations;
   });
-  $("#new-game").addEventListener("click", startGame);
-  $("[data-action=pass]").addEventListener("click", passMove);
-  $("[data-action=undo]").addEventListener("click", undoMove);
-  $("[data-action=hint]").addEventListener("click", hint);
-  $("[data-action=ai]").addEventListener("click", aiMove);
-  $("#cancel-thinking").addEventListener("click", () =>
+
+  $("#new-game")?.addEventListener("click", startGame);
+  $("[data-action=pass]")?.addEventListener("click", passMove);
+  $("[data-action=undo]")?.addEventListener("click", undoMove);
+  $("[data-action=hint]")?.addEventListener("click", hint);
+  $("[data-action=sgf]")?.addEventListener("click", exportSgf);
+  $("[data-action=ai]")?.addEventListener("click", aiMove);
+
+  $("#cancel-thinking")?.addEventListener("click", () =>
     toast(
       "The current request cannot be cancelled by the backend; waiting for its response.",
     ),
   );
-  $("#wake-retry").addEventListener("click", () => {
+
+  $("#wake-retry")?.addEventListener("click", () => {
     wakeAttempt = 0;
     wakeEngine();
   });
-  $("#sp-start").addEventListener("click", startSelfplay);
-  $("#sp-step").addEventListener("click", selfplayStep);
-  $("#sp-save").addEventListener("click", saveSelfplay);
-  $("#sp-train").addEventListener("click", startTraining);
-  $("#eval-start").addEventListener("click", runEvaluation);
+
+  $("#wake-demo")?.addEventListener("click", enableDemoMode);
+
+  $("#rules-toggle")?.addEventListener("click", () => {
+    $("#rules-dialog")?.showModal();
+  });
+
+  $("#admin-toggle")?.addEventListener("click", () => {
+    $("#admin-dialog")?.showModal();
+  });
+
+  $("#eval-admin-unlock")?.addEventListener("click", () => {
+    $("#admin-dialog")?.showModal();
+  });
+
+  $("#admin-unlock-btn")?.addEventListener("click", () => {
+    const passcode = $("#admin-passcode-input")?.value || "";
+    verifyAndSaveAdminToken(passcode);
+  });
+
+  $("#admin-clear-btn")?.addEventListener("click", clearAdminToken);
+
+  $("#sp-start")?.addEventListener("click", startSelfplay);
+  $("#sp-step")?.addEventListener("click", selfplayStep);
+  $("#sp-save")?.addEventListener("click", saveSelfplay);
+  $("#sp-train")?.addEventListener("click", startTraining);
+  $("#eval-start")?.addEventListener("click", runEvaluation);
+
   $$("[data-close-dialog]").forEach((btn) =>
-    btn.addEventListener("click", () => $("#game-dialog")?.close()),
+    btn.addEventListener("click", (e) => {
+      e.target.closest("dialog")?.close();
+    }),
   );
-  $("#dialog-new-game").addEventListener("click", () => {
-    $("#game-dialog").close();
+
+  $("#dialog-new-game")?.addEventListener("click", () => {
+    $("#game-dialog")?.close();
     startGame();
   });
+
   window.addEventListener("keydown", (event) => {
     if (event.target.matches("input,select,textarea")) return;
-    if (event.key.toLowerCase() === "p") passMove();
-    if (event.key.toLowerCase() === "u") undoMove();
-    if (event.key.toLowerCase() === "h") hint();
+    const key = event.key.toLowerCase();
+    if (key === "p") passMove();
+    if (key === "u") undoMove();
+    if (key === "h") hint();
+    if (event.code === "Space") {
+      event.preventDefault();
+      aiMove();
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      if ($("#panel-play").classList.contains("active")) {
+        startGame();
+      }
+    }
   });
 }
+
 bind();
 wakeEngine();

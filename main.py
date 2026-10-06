@@ -418,12 +418,12 @@ def run_promotion(
     if promoted:
         promoter.promote(candidate_path)
         print(
-            f"  ✓  Candidate PROMOTED  (win rate {win_rate:.2%} ≥ {threshold:.2%})"
+            f"  [OK] Candidate PROMOTED  (win rate {win_rate:.2%} >= {threshold:.2%})"
         )
     else:
         promoter.reject(candidate_path)
         print(
-            f"  ✗  Candidate REJECTED  (win rate {win_rate:.2%} < {threshold:.2%})"
+            f"  [X] Candidate REJECTED  (win rate {win_rate:.2%} < {threshold:.2%})"
         )
 
     return promoted
@@ -551,6 +551,32 @@ def run_pipeline(
             simulations=simulations,
             board_size=board_size,
         )
+
+        # Save evaluation match record to evaluation_history.json so it updates the web leaderboard
+        try:
+            import json
+            eval_history_path = os.path.join(DATA_DIR, "evaluation_history.json")
+            history_data = []
+            if os.path.exists(eval_history_path):
+                with open(eval_history_path, "r", encoding="utf-8") as f:
+                    history_data = json.load(f)
+            history_data.append({
+                "timestamp": int(time.time()),
+                "model_a": os.path.basename(candidate_path),
+                "model_b": os.path.basename(current_best_path),
+                "sims_a": simulations,
+                "sims_b": simulations,
+                "num_games": eval_games,
+                "model_a_wins": eval_result["wins"],
+                "model_b_wins": eval_result["losses"],
+                "draws": eval_result["draws"],
+                "win_rate_a": round(eval_result["win_rate"] * 100, 1),
+                "win_rate_b": round((eval_result["losses"] / eval_games * 100), 1) if eval_games > 0 else 0.0
+            })
+            with open(eval_history_path, "w", encoding="utf-8") as f:
+                json.dump(history_data, f, indent=2)
+        except Exception as e:
+            print(f"  WARNING: Could not save evaluation match record: {e}")
 
         # 5. Promotion.
         promoted = run_promotion(
