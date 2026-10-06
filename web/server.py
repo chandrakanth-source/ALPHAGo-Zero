@@ -19,6 +19,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Limit PyTorch CPU thread allocation to prevent thread thrashing on cloud containers (Render/Vercel)
+try:
+    torch.set_num_threads(1)
+except Exception:
+    pass
+
 # Add project root to sys.path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -457,7 +463,8 @@ def execute_ai_turn() -> Dict[str, Any]:
         return {}
 
     model_path = session.resolved_model_path
-    sims = session.resolved_sims
+    # Cap max simulations to 30 for online web API responses to keep inference under 2 seconds on shared CPU
+    sims = min(session.resolved_sims, int(os.environ.get("MAX_ONLINE_SIMS", "30")))
 
     model = get_or_load_model(model_path, session.board_size)
     searcher = MCTS(
@@ -687,7 +694,7 @@ class InteractiveSelfPlaySession:
 
         curr_player = self.game.current_player  # 1 = Black, -1 = White
         curr_model = self.model_black if curr_player == 1 else self.model_white
-        curr_sims = self.sims_black if curr_player == 1 else self.sims_white
+        curr_sims = min(self.sims_black if curr_player == 1 else self.sims_white, int(os.environ.get("MAX_ONLINE_SIMS", "30")))
         curr_temp = self.temp_black if curr_player == 1 else self.temp_white
         curr_model_name = self.model_black_file if curr_player == 1 else self.model_white_file
 
