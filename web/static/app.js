@@ -979,6 +979,18 @@ async function selfplayStep() {
   try {
     const res = await apiRequest("/api/selfplay/step", "POST");
     updateGame(res);
+    if (res.move_history && res.move_history.length > 0) {
+      const last = res.move_history[res.move_history.length - 1];
+      const line = `[Self-Play Move #${res.move_number}] ${last.player} -> ${last.action} (${last.time}s) | Win prob: ${Math.round((last.win_prob_black || 0.5) * 100)}% | Sims: ${last.sims || '--'}`;
+      if ($("#sp-log")) {
+        const existing = $("#sp-log").textContent === "No log lines reported." ? "" : $("#sp-log").textContent;
+        const lines = existing.split("\n").filter(Boolean);
+        lines.push(line);
+        if (lines.length > 50) lines.shift();
+        $("#sp-log").textContent = lines.join("\n");
+      }
+      if ($("#sp-status")) $("#sp-status").textContent = res.game_over ? "Complete" : "Running";
+    }
   } catch (error) {
     if (autoSelfplayTimer) {
       clearInterval(autoSelfplayTimer);

@@ -674,6 +674,13 @@ class InteractiveSelfPlaySession:
         self.last_top_moves: List[Dict[str, Any]] = []
         self.move_number: int = 0
 
+        training_state["is_training"] = True
+        init_log = f"[Self-Play] New match initialized on {self.board_size}x{self.board_size} board (Black: {self.model_black_file}, White: {self.model_white_file})."
+        training_state["progress"] = init_log
+        if "log" not in training_state or not isinstance(training_state["log"], list):
+            training_state["log"] = []
+        training_state["log"].append(init_log)
+
     def step(self) -> Dict[str, Any]:
         if self.game.is_terminal():
             return self.get_response()
@@ -772,10 +779,23 @@ class InteractiveSelfPlaySession:
 
         self.move_number += 1
 
+        log_line = f"[Self-Play Move #{self.move_number}] {player_str} ({curr_model_name}) -> {move_name} ({round(elapsed, 2)}s) | Win prob: {round(self.last_ai_eval*100, 1)}% | Sims: {curr_sims}"
+        training_state["is_training"] = True
+        training_state["progress"] = log_line
+        if "log" not in training_state or not isinstance(training_state["log"], list):
+            training_state["log"] = []
+        training_state["log"].append(log_line)
+        if len(training_state["log"]) > 100:
+            training_state["log"] = training_state["log"][-100:]
+
         if self.game.is_terminal():
             winner = self.game.get_winner()
             for st, pol in zip(self.raw_states, self.raw_policies):
                 self.examples.append((st, pol, float(winner)))
+            w_str = "Black" if winner == 1 else ("White" if winner == -1 else "Draw")
+            finish_log = f"[Self-Play] Game Over! Winner: {w_str}. Total examples collected: {len(self.examples)}"
+            training_state["log"].append(finish_log)
+            training_state["progress"] = finish_log
 
         return self.get_response()
 
