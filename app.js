@@ -606,6 +606,7 @@ function buildBoard() {
   grid.setAttribute("stroke", "#4f2d16");
   grid.setAttribute("stroke-width", "1.5");
   grid.setAttribute("opacity", ".88");
+  grid.setAttribute("pointer-events", "none");
 
   for (let index = 0; index < size; index += 1) {
     const position = margin + index * step;
@@ -627,6 +628,7 @@ function buildBoard() {
 
   const points = document.createElementNS(ns, "g");
   points.setAttribute("fill", "#3d210e");
+  points.setAttribute("pointer-events", "none");
   starPoints(size).forEach(([row, col]) => {
     const point = document.createElementNS(ns, "circle");
     point.setAttribute("cx", margin + col * step);
@@ -640,6 +642,7 @@ function buildBoard() {
   labels.setAttribute("fill", "#5b351a");
   labels.setAttribute("font-size", "12");
   labels.setAttribute("font-family", "JetBrains Mono, monospace");
+  labels.setAttribute("pointer-events", "none");
 
   for (let index = 0; index < size; index += 1) {
     const x = margin + index * step;
@@ -676,6 +679,12 @@ function buildBoard() {
       );
       group.classList.add("intersection");
       group.addEventListener("click", () => playMove(row, col));
+
+      const hitTarget = document.createElementNS(ns, "circle");
+      hitTarget.setAttribute("r", step * 0.48);
+      hitTarget.setAttribute("fill", "transparent");
+      hitTarget.setAttribute("pointer-events", "all");
+      group.append(hitTarget);
 
       const ghost = document.createElementNS(ns, "circle");
       ghost.setAttribute("r", step * 0.39);

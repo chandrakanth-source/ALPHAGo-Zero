@@ -30,6 +30,7 @@ from main import run_pipeline
 EXPERT_STAGE_CONFIG = {
     "stage": 4,
     "name": "Expert Level",
+    "start_iteration": 7,
     "iterations": 2,           # Iterations 7 & 8
     "simulations": 80,          # 80 MCTS simulations per move
     "self_play_games": 850,     # 850 games per iteration
@@ -70,7 +71,8 @@ def run_expert_level_training(board_size: int = BOARD_SIZE):
             batch_size=BATCH_SIZE,
             eval_games=EVALUATION_GAMES,
             promotion_threshold=PROMOTION_THRESHOLD,
-            force_fresh=False
+            force_fresh=False,
+            start_iteration=cfg["start_iteration"] + i - 1
         )
 
         elapsed_iter = time.time() - t0
