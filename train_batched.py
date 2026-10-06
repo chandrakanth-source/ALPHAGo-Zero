@@ -99,10 +99,17 @@ def run_iteration(iteration, cfg, args, state, state_path, batch_dir):
 
     selfplay_batches(model, iteration, cfg["games"], cfg["sims"], args.batch_size, args.workers, batch_dir)
 
+    # Replay window: train on this iteration's games plus the previous
+    # (replay_window - 1) iterations' games, as AlphaGo Zero does.
+    window = range(iteration - args.replay_window + 1, iteration + 1)
     examples = []
-    for f in sorted(os.listdir(batch_dir)):
-        if f.startswith(f"iter{iteration}_batch") and f.endswith(".pt"):
-            examples.extend(torch.load(os.path.join(batch_dir, f), weights_only=False))
+    for it in window:
+        n_before = len(examples)
+        for f in sorted(os.listdir(batch_dir)):
+            if f.startswith(f"iter{it}_batch") and f.endswith(".pt"):
+                examples.extend(torch.load(os.path.join(batch_dir, f), weights_only=False))
+        if len(examples) > n_before:
+            log(f"replay window: iteration {it} -> {len(examples) - n_before} examples")
     data_path = os.path.join(pipeline.DATA_DIR, f"self_play_iteration_{iteration}.pt")
     torch.save(examples, data_path)
     log(f"merged {len(examples)} examples -> {data_path}")
@@ -143,6 +150,8 @@ def main():
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--batch-size", type=int, default=25)
     ap.add_argument("--workers", type=int, default=default_workers())
+    ap.add_argument("--replay-window", type=int, default=2,
+                    help="train on the last N iterations' self-play games")
     ap.add_argument("--smoke", action="store_true", help="tiny run in an isolated temp dir")
     args = ap.parse_args()
     stages = [2, 3, 4, 5] if args.all else ([args.stage] if args.stage else [])
