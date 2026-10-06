@@ -106,24 +106,45 @@ async function mockRequest(endpoint, method, data) {
   if (endpoint === "/api/verify_admin")
     return { valid: data?.token === "alphago2026", message: "Mock admin check" };
   if (endpoint === "/api/new_game") {
-    Object.assign(state, {
-      boardSize: data.board_size,
-      humanColor: data.human_color,
-      simulations: data.simulations,
-      modelFile: data.model_file || "model_iteration_1.pt",
-      moveHistory: [],
-      moveNumber: 0,
-      lastAiMove: null,
-    });
-    return mockGame();
+    state.mockGameObj = mockGame();
+    if (data?.human_color === -1) {
+      state.mockGameObj.board[3][3] = 1;
+      state.mockGameObj.move_history.push({
+        player: "AI",
+        color: 1,
+        action: "D4",
+        coords: [3, 3],
+        time: 0.1,
+        win_prob_black: 0.52
+      });
+      state.mockGameObj.current_player = -1;
+      state.mockGameObj.last_ai_move = [3, 3];
+    }
+    return state.mockGameObj;
   }
-  if (endpoint === "/api/state") return mockGame();
-  if (
-    endpoint === "/api/move" ||
-    endpoint === "/api/ai_move" ||
-    endpoint === "/api/undo"
-  )
-    return mockGame();
+  if (endpoint === "/api/state") return state.mockGameObj || mockGame();
+  if (endpoint === "/api/move") {
+    if (!state.mockGameObj) state.mockGameObj = mockGame();
+    const g = state.mockGameObj;
+    if (data?.is_pass) {
+      g.move_history.push({ player: "Human", color: state.humanColor, action: "PASS", coords: null });
+    } else if (data?.row != null && data?.col != null) {
+      g.board[data.row][data.col] = state.humanColor;
+      const moveName = `${String.fromCharCode(65 + data.col)}${data.row + 1}`;
+      g.move_history.push({ player: "Human", color: state.humanColor, action: moveName, coords: [data.row, data.col] });
+      g.current_player = -state.humanColor;
+      const aiR = (data.row + 2) % state.boardSize;
+      const aiC = (data.col + 2) % state.boardSize;
+      if (g.board[aiR][aiC] === 0) {
+        g.board[aiR][aiC] = -state.humanColor;
+        const aiMoveName = `${String.fromCharCode(65 + aiC)}${aiR + 1}`;
+        g.last_ai_move = [aiR, aiC];
+        g.move_history.push({ player: "AI", color: -state.humanColor, action: aiMoveName, coords: [aiR, aiC], time: 0.15, win_prob_black: 0.5 });
+        g.current_player = state.humanColor;
+      }
+    }
+    return g;
+  }
   if (endpoint === "/api/hint")
     return {
       coords: [
