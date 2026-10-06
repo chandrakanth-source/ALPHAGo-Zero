@@ -102,5 +102,31 @@
     "draws": 0,
     "win_rate_a": 95.0,
     "win_rate_b": 5.0
+  },
+  {
+    "timestamp": 1791304565,
+    "model_a": "model_iteration_3.pt",
+    "model_b": "latest_model.pt",
+    "sims_a": 35,
+    "sims_b": 35,
+    "num_games": 20,
+    "model_a_wins": 6,
+    "model_b_wins": 14,
+    "draws": 0,
+    "win_rate_a": 30.0,
+    "win_rate_b": 70.0
+  },
+  {
+    "timestamp": 1791306905,
+    "model_a": "model_iteration_4.pt",
+    "model_b": "latest_model.pt",
+    "sims_a": 35,
+    "sims_b": 35,
+    "num_games": 20,
+    "model_a_wins": 14,
+    "model_b_wins": 6,
+    "draws": 0,
+    "win_rate_a": 70.0,
+    "win_rate_b": 30.0
   }
 ]
