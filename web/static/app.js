@@ -64,6 +64,12 @@ function mockGame() {
   const board = Array.from({ length: state.boardSize }, () =>
     Array(state.boardSize).fill(0),
   );
+  const legal_moves = [];
+  for (let r = 0; r < state.boardSize; r++) {
+    for (let c = 0; c < state.boardSize; c++) {
+      if (board[r][c] === 0) legal_moves.push([r, c]);
+    }
+  }
   return {
     active: true,
     board_size: state.boardSize,
@@ -77,7 +83,7 @@ function mockGame() {
     white_score: 0,
     black_stones: 0,
     white_stones: 0,
-    legal_moves: [],
+    legal_moves,
     move_history: [],
     last_ai_move: null,
     ai_win_prob_black: 0.5,
@@ -143,6 +149,13 @@ async function mockRequest(endpoint, method, data) {
         g.current_player = state.humanColor;
       }
     }
+    const legals = [];
+    for (let r = 0; r < state.boardSize; r++) {
+      for (let c = 0; c < state.boardSize; c++) {
+        if (g.board[r][c] === 0) legals.push([r, c]);
+      }
+    }
+    g.legal_moves = legals;
     return g;
   }
   if (endpoint === "/api/hint")
