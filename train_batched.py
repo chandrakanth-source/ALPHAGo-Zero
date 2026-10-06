@@ -77,6 +77,16 @@ def selfplay_batches(model, iteration, games, sims, batch_size, workers, batch_d
             f"(ETA this iteration ~{el * (n_batches - b - 1) / 3600:.1f} h)")
 
 
+def verify_model(path):
+    """load_model silently falls back to random weights; refuse that here."""
+    from network.network import GoNetwork
+
+    sd = torch.load(path, map_location="cpu", weights_only=False)
+    if isinstance(sd, dict) and "model_state_dict" in sd:
+        sd = sd["model_state_dict"]
+    GoNetwork(board_size=BOARD_SIZE).load_state_dict(sd, strict=True)
+
+
 def run_iteration(iteration, cfg, args, state, state_path, batch_dir):
     key = str(iteration)
     if key in state["done_iterations"]:
@@ -84,6 +94,7 @@ def run_iteration(iteration, cfg, args, state, state_path, batch_dir):
         return
     log(f"=== ITERATION {iteration}: {cfg['games']} games, {cfg['sims']} sims, {cfg['epochs']} epochs ===")
     best_path = pipeline.LATEST_MODEL_PATH
+    verify_model(best_path)
     model = load_model(best_path, board_size=BOARD_SIZE)
 
     selfplay_batches(model, iteration, cfg["games"], cfg["sims"], args.batch_size, args.workers, batch_dir)
@@ -101,6 +112,7 @@ def run_iteration(iteration, cfg, args, state, state_path, batch_dir):
         epochs=cfg["epochs"], batch_size=BATCH_SIZE, board_size=BOARD_SIZE, resume=True,
     )
 
+    verify_model(cand_path)
     result = evaluate_parallel(best_path, cand_path, cfg["eval_games"], cfg["sims"],
                                board_size=BOARD_SIZE, workers=args.workers)
     hist_path = os.path.join(pipeline.DATA_DIR, "evaluation_history.json")

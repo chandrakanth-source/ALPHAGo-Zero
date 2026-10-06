@@ -39,8 +39,11 @@ class SelfPlay:
         model=None,
         temperature=1.0,
         temp_threshold=30,
+        dirichlet_alpha=None,
     ):
         self.board_size = board_size
+        # AlphaGo Zero uses alpha ~ 10 / (typical legal moves); 0.03 on 19x19.
+        self.dirichlet_alpha = dirichlet_alpha
         self.simulations = simulations
         self.temperature = temperature
         self.temp_threshold = temp_threshold
@@ -255,6 +258,7 @@ class SelfPlay:
                 game=game,
                 board_size=self.board_size,
                 simulations=self.simulations,
+                dirichlet_alpha=self.dirichlet_alpha,
             )
 
             # Override the default NetworkEvaluator with our shared one so

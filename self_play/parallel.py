@@ -34,6 +34,7 @@ def _init_worker(state_dict, board_size, simulations, temperature, temp_threshol
         evaluator=NetworkEvaluator(model),
         temperature=temperature,
         temp_threshold=temp_threshold,
+        dirichlet_alpha=10.0 / (board_size * board_size),
     )
 
 

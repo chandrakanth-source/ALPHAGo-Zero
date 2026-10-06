@@ -53,7 +53,9 @@ class MCTS:
         game=None,
         board_size=None,
         simulations=100,
-        c_puct=1.5
+        c_puct=1.5,
+        dirichlet_alpha=None,
+        dirichlet_eps=0.25
     ):
 
         # Support the legacy MCTS(game, evaluator) call shape.
@@ -86,6 +88,11 @@ class MCTS:
         self.simulations = simulations
 
         self.c_puct = c_puct
+
+        # Root exploration noise (self-play only); None disables it.
+        self.dirichlet_alpha = dirichlet_alpha
+
+        self.dirichlet_eps = dirichlet_eps
 
         if (
             'legacy_evaluator' in locals()
@@ -346,6 +353,21 @@ class MCTS:
         if not self.root.children:
 
             return state.get_pass_action()
+
+        if self.dirichlet_alpha:
+
+            children = list(self.root.children.values())
+
+            noise = np.random.dirichlet(
+                [self.dirichlet_alpha] * len(children)
+            )
+
+            for child, n in zip(children, noise):
+
+                child.prior = (
+                    (1 - self.dirichlet_eps) * child.prior
+                    + self.dirichlet_eps * float(n)
+                )
 
         # Run simulations.
 
