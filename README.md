@@ -411,6 +411,33 @@ After each completed iteration you will see output like:
 
 ---
 
+## 🌐 Web Application & Deployment
+
+The web interface is composed of:
+1. **Frontend**: Hosted on Vercel static CDN (`index.html`, `app.js`, `style.css`).
+2. **Backend**: FastAPI REST engine hosted on Render (`web/server.py`).
+
+### ⚡ Render Cold Start & Health Keep-Alive Service
+
+Free Render containers sleep after 15 minutes of inactivity, causing visitors landing on the page to wait 30–60 seconds for a cold start.
+
+To keep the engine instantly responsive:
+1. **Health Check Endpoints**:
+   - `GET /health` or `GET /api/ping` returns JSON status `{ "status": "ok", "engine_ready": true, "uptime_seconds": 120 }`.
+2. **Free Ping Service Setup (UptimeRobot or cron-job.org)**:
+   - Create a free HTTP monitor pointing to `https://alphago-zero.onrender.com/health`.
+   - Set the check interval to **every 10 minutes**.
+   - This prevents Render from putting the container to sleep, ensuring instantaneous load times for all visitors.
+
+### 🔐 Security & Admin Mode Passcode
+
+Heavy server jobs (Self-play data generation, PyTorch iteration training, and evaluation benchmarks) write to disk and consume CPU/RAM resources. To prevent public server overload or unauthorized triggers:
+- Admin password can be set via `ADMIN_PASSWORD` env var on Render (defaults to `alphago2026`).
+- Visitors can view live self-play logs, leaderboard Elo ratings, and play against AI without any password.
+- Clicking "Start self-play", "Train iteration", or "Run evaluation" requires entering the Admin Passcode via the topbar **Admin Mode** button or popup.
+
+---
+
 ## 📖 References
 
 - [Mastering the Game of Go without Human Knowledge — Silver et al., 2017](https://www.nature.com/articles/nature24270)

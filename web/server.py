@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any, List
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -42,6 +42,18 @@ app.add_middleware(
 
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
+
+SERVER_START_TIME = time.time()
+job_lock = threading.Lock()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "alphago2026")
+
+def verify_admin_auth(x_admin_token: Optional[str] = None, token: Optional[str] = None):
+    auth_token = x_admin_token or token
+    if ADMIN_PASSWORD and auth_token != ADMIN_PASSWORD:
+        raise HTTPException(
+            status_code=401,
+            detail="Admin passcode required for this action. Please click 'Admin Mode' in the top bar to authenticate."
+        )
 
 # ---------------------------------------------------------------------------
 # Global Game State & Model Cache
@@ -164,40 +176,46 @@ def get_or_load_model(model_path: Optional[str], board_size: int) -> GoNetwork:
     return model
 
 def get_preset_configs(board_size: int = 12) -> Dict[str, Dict[str, Any]]:
-    iter1_path = os.path.join(MODELS_DIR, "model_iteration_1.pt")
-    iter2_path = os.path.join(MODELS_DIR, "model_iteration_2.pt")
-    iter3_path = os.path.join(MODELS_DIR, "model_iteration_3.pt")
-    iter4_path = os.path.join(MODELS_DIR, "model_iteration_4.pt")
     latest_path = os.path.join(MODELS_DIR, "latest_model.pt")
+    def get_path(iter_num):
+        p = os.path.join(MODELS_DIR, f"model_iteration_{iter_num}.pt")
+        return p if os.path.exists(p) else latest_path
 
     return {
-        "novice": {
-            "name": "Level 1: Beginner (Iteration 1)",
-            "description": "Checkpoint model_iteration_1.pt with 10 MCTS simulations.",
-            "model_path": iter1_path if os.path.exists(iter1_path) else latest_path,
-            "simulations": 10,
-            "badge": "Beginner"
+        "easy": {
+            "name": "Level 1: Easy (Iterations 1–2)",
+            "description": "Trained on 250 self-play games/iter (20 MCTS sims/move), ~1100 Elo.",
+            "model_path": get_path(2),
+            "simulations": 20,
+            "badge": "Easy"
         },
-        "apprentice": {
-            "name": "Level 2: Intermediate (Iteration 2)",
-            "description": "Checkpoint model_iteration_2.pt with 25 MCTS simulations.",
-            "model_path": iter2_path if os.path.exists(iter2_path) else latest_path,
-            "simulations": 25,
-            "badge": "Tactical"
+        "intermediate": {
+            "name": "Level 2: Intermediate (Iterations 3–4)",
+            "description": "Trained on 500 self-play games/iter (40 MCTS sims/move), ~1350 Elo.",
+            "model_path": get_path(4),
+            "simulations": 40,
+            "badge": "Intermediate"
+        },
+        "difficult": {
+            "name": "Level 3: Difficult (Iterations 5–6)",
+            "description": "Trained on 500 self-play games/iter (80 MCTS sims/move), ~1600 Elo.",
+            "model_path": get_path(6),
+            "simulations": 80,
+            "badge": "Difficult"
         },
         "expert": {
-            "name": "Level 3: Advanced (Iteration 3)",
-            "description": "Checkpoint model_iteration_3.pt with 100 MCTS simulations.",
-            "model_path": iter3_path if os.path.exists(iter3_path) else latest_path,
+            "name": "Level 4: Expert (Iterations 7–8)",
+            "description": "Trained on 500 self-play games/iter (100 MCTS sims/move), ~1850 Elo.",
+            "model_path": get_path(8),
             "simulations": 100,
-            "badge": "Strategic"
+            "badge": "Expert"
         },
-        "master": {
-            "name": "Level 4: Master (Iteration 4 / Latest)",
-            "description": "Checkpoint model_iteration_4.pt with 250 MCTS simulations.",
-            "model_path": iter4_path if os.path.exists(iter4_path) else latest_path,
+        "super_expert": {
+            "name": "Level 5: Super Expert (Iterations 9–10)",
+            "description": "Trained on 500 self-play games/iter (250 MCTS sims/move), ~2100 Elo.",
+            "model_path": get_path(10),
             "simulations": 250,
-            "badge": "AlphaGo Master"
+            "badge": "Super Expert"
         }
     }
 
@@ -239,6 +257,33 @@ class SelfPlayNewRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@app.get("/health")
+@app.get("/api/ping")
+def health_check():
+    """
+    Health check endpoint for keep-alive ping services (UptimeRobot, cron-job.org)
+    and cold start polling.
+    """
+    return {
+        "status": "ok",
+        "engine_ready": True,
+        "uptime_seconds": round(time.time() - SERVER_START_TIME, 1),
+        "timestamp": int(time.time()),
+        "cached_models": len(model_cache),
+        "active_session": session is not None,
+        "is_job_running": job_lock.locked(),
+        "message": "AlphaGo Zero engine inference service active"
+    }
+
+class AdminVerifyRequest(BaseModel):
+    token: str
+
+@app.post("/api/verify_admin")
+def verify_admin(req: AdminVerifyRequest):
+    if req.token == ADMIN_PASSWORD:
+        return {"valid": True, "message": "Admin authorization granted."}
+    return {"valid": False, "message": "Invalid admin passcode."}
 
 @app.get("/api/selfplay_status")
 def get_selfplay_status():
@@ -286,14 +331,37 @@ def get_selfplay_status():
 
     current_iter = model_files[-1]["iteration"] if model_files else 0
 
-    # Detect current phase from training_state
+    # Detect current phase from training_state or live background task log files
     phase = "idle"
     is_active = training_state.get("is_training", False)
     progress_text = training_state.get("progress", "")
-    log_lines = training_state.get("log", [])
+    log_lines = list(training_state.get("log", []))
+
+    if not log_lines:
+        import glob
+        task_log_patterns = [
+            os.path.expanduser(r"~\.gemini\antigravity-ide\brain\*\.system_generated\tasks\*.log")
+        ]
+        found_logs = []
+        for pat in task_log_patterns:
+            found_logs.extend(glob.glob(pat))
+        if found_logs:
+            found_logs.sort(key=os.path.getmtime, reverse=True)
+            latest_log_path = found_logs[0]
+            # Check if updated in the last 10 minutes
+            if time.time() - os.path.getmtime(latest_log_path) < 600:
+                try:
+                    with open(latest_log_path, "r", encoding="utf-8", errors="ignore") as lf:
+                        lines = [line.strip() for line in lf.readlines() if line.strip()]
+                        if lines:
+                            log_lines = lines[-50:]
+                            is_active = True
+                            progress_text = lines[-1]
+                except Exception:
+                    pass
 
     if is_active:
-        p = progress_text.lower()
+        p = (progress_text + " ".join(log_lines[-5:])).lower()
         if "self-play" in p or "self_play" in p or "game" in p:
             phase = "selfplay"
         elif "train" in p or "epoch" in p:
@@ -770,7 +838,11 @@ def get_selfplay_state():
     return selfplay_session.get_response()
 
 @app.post("/api/selfplay/save_data")
-def save_selfplay_data():
+def save_selfplay_data(
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
+    token: Optional[str] = Query(None)
+):
+    verify_admin_auth(x_admin_token, token)
     global selfplay_session
     if not selfplay_session or not selfplay_session.examples:
         raise HTTPException(status_code=400, detail="No self-play examples collected yet.")
@@ -839,13 +911,29 @@ def run_training_worker(iterations_to_run: int = 1):
         training_state["log"].append(traceback.format_exc())
     finally:
         training_state["is_training"] = False
+        if job_lock.locked():
+            try:
+                job_lock.release()
+            except RuntimeError:
+                pass
 
 @app.post("/api/train")
-def trigger_training(iterations: int = 1):
+def trigger_training(
+    iterations: int = 1,
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
+    token: Optional[str] = Query(None)
+):
+    verify_admin_auth(x_admin_token, token)
     global training_state
     if training_state["is_training"]:
         raise HTTPException(status_code=400, detail="Training is already in progress.")
     
+    if not job_lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="Server busy: another heavy background task (training or evaluation) is currently active."
+        )
+
     training_state["is_training"] = True
     training_state["progress"] = "Initializing training worker..."
     training_state["log"] = []
@@ -1043,13 +1131,29 @@ def run_evaluation_worker(req: EvaluateRequest):
         evaluation_state["log"].append(traceback.format_exc())
     finally:
         evaluation_state["is_evaluating"] = False
+        if job_lock.locked():
+            try:
+                job_lock.release()
+            except RuntimeError:
+                pass
 
 @app.post("/api/evaluate")
-def trigger_evaluation(req: EvaluateRequest):
+def trigger_evaluation(
+    req: EvaluateRequest,
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
+    token: Optional[str] = Query(None)
+):
+    verify_admin_auth(x_admin_token, token)
     global evaluation_state
     if evaluation_state["is_evaluating"]:
         raise HTTPException(status_code=400, detail="Evaluation benchmark is already running.")
     
+    if not job_lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="Server busy: another heavy background task (training or evaluation) is currently active."
+        )
+
     worker = threading.Thread(target=run_evaluation_worker, args=(req,), daemon=True)
     worker.start()
     return {"status": "started", "config": req.dict()}
@@ -1175,4 +1279,21 @@ app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    import socket
+
+    def find_free_port(start_port: int = 9000) -> int:
+        for p in range(start_port, start_port + 20):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("127.0.0.1", p))
+                    return p
+                except OSError:
+                    continue
+        return start_port
+
+    env_port = os.environ.get("PORT")
+    target_port = int(env_port) if env_port else find_free_port(9000)
+    print(f"\n=======================================================")
+    print(f"  AlphaGo Zero Arena server ready at: http://127.0.0.1:{target_port}")
+    print(f"=======================================================\n")
+    uvicorn.run(app, host="127.0.0.1", port=target_port)

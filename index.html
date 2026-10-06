@@ -4,7 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0b0d12" />
-    <title>AlphaGo Zero Arena</title>
+    <title>AlphaGo Zero Arena — Scaled PyTorch Replication & Interactive UI</title>
+    <meta name="description" content="Play against a scaled-down AlphaGo Zero PyTorch implementation with live MCTS search, value-head win probabilities, iterative self-play, and checkpoint benchmarking." />
+    <meta property="og:title" content="AlphaGo Zero Arena" />
+    <meta property="og:description" content="Interactive AI Go engine powered by PyTorch ResNet & MCTS search. Play against checkpoints, watch self-play, and inspect Elo strength." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -15,35 +20,52 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <!-- Engine Cold Start Overlay -->
     <div class="engine-overlay" id="engine-overlay" aria-live="polite">
       <div class="wake-card">
         <div class="stone-loader"><i></i><i></i><i></i></div>
         <p class="eyebrow">ALPHAGO ZERO ARENA</p>
-        <h1>Waking the engine<span class="ellipsis">...</span></h1>
+        <h1 id="wake-title">Waking the engine<span class="ellipsis">...</span></h1>
         <p id="wake-message">Connecting to the Render inference service.</p>
         <div class="wake-progress"><span id="wake-progress"></span></div>
-        <button class="button button-quiet" id="wake-retry" type="button">
-          Retry now
-        </button>
+        <div class="wake-actions">
+          <button class="button button-quiet" id="wake-retry" type="button">
+            Retry now
+          </button>
+          <button class="button button-quiet" id="wake-demo" type="button">
+            Switch to Demo Mode
+          </button>
+        </div>
       </div>
     </div>
+
+    <!-- Topbar Header -->
     <header class="topbar">
-      <a class="brand" href="#play" aria-label="AlphaGo Zero Arena home"
-        ><span class="brand-mark"><span></span><span></span><span></span></span
-        ><span><b>AlphaGo</b> Zero <small>ARENA / 2017</small></span></a
-      >
+      <a class="brand" href="#play" aria-label="AlphaGo Zero Arena home">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span><b>AlphaGo</b> Zero <small>ARENA / 2017</small></span>
+      </a>
       <nav class="tabs" aria-label="Primary navigation">
-        <button class="tab active" data-tab="play" type="button">Play</button
-        ><button class="tab" data-tab="selfplay" type="button">Self-Play</button
-        ><button class="tab" data-tab="evaluation" type="button">
-          Evaluation</button
-        ><button class="tab" data-tab="paper" type="button">Paper</button>
+        <button class="tab active" data-tab="play" type="button">Play</button>
+        <button class="tab" data-tab="selfplay" type="button">Self-Play</button>
+        <button class="tab" data-tab="evaluation" type="button">Evaluation</button>
+        <button class="tab" data-tab="paper" type="button">Paper</button>
       </nav>
-      <div class="engine-status" id="engine-status">
-        <span></span><label>Waking engine</label>
+      <div class="header-right">
+        <button class="button button-quiet btn-sm" id="rules-toggle" type="button" title="View Go rules & game instructions">
+          <span class="icon">?</span> How to Play
+        </button>
+        <button class="button button-quiet btn-sm" id="admin-toggle" type="button" title="Toggle Admin Key for training/eval actions">
+          <span class="admin-lock-icon" id="admin-status-dot"></span> <span id="admin-btn-text">Admin</span>
+        </button>
+        <div class="engine-status" id="engine-status">
+          <span></span><label>Waking engine</label>
+        </div>
       </div>
     </header>
+
     <main>
+      <!-- Section 1: Play -->
       <section class="tab-panel active" id="panel-play" data-panel="play">
         <div class="page-heading">
           <div>
@@ -51,12 +73,14 @@
             <h1>Find the move<br /><em>beneath the move.</em></h1>
           </div>
           <div class="heading-note">
-            <span class="live-dot"></span
-            ><span id="mode-note">MCTS inference ready</span
-            ><small>Free Render instance may sleep between games.</small>
+            <span class="live-dot"></span>
+            <span id="mode-note">MCTS inference ready</span>
+            <small>Free Render instance may sleep between games.</small>
           </div>
         </div>
+
         <div class="play-layout">
+          <!-- Opponent Configuration Side Panel -->
           <aside class="panel controls-panel">
             <div class="panel-heading">
               <div>
@@ -65,14 +89,22 @@
               </div>
               <span class="panel-index">01</span>
             </div>
-            <label class="field-label" for="model-select">Checkpoint</label
-            ><select class="select" id="model-select">
+
+            <label class="field-label" for="model-select">Checkpoint</label>
+            <select class="select" id="model-select">
               <option>Loading checkpoints...</option>
             </select>
+
+            <div class="elo-badge-row">
+              <span class="field-label">Model Strength</span>
+              <span class="elo-chip" id="model-elo-badge">~1650 Elo</span>
+            </div>
+
             <div class="field-row">
-              <label class="field-label" for="sims-range"
-                >MCTS simulations <output id="sims-value">50</output></label
-              ><span class="mono">per move</span>
+              <label class="field-label" for="sims-range" title="More simulations improve move tactical accuracy">
+                MCTS simulations <output id="sims-value">50</output>
+              </label>
+              <span class="mono">per move</span>
             </div>
             <input
               class="range"
@@ -82,45 +114,60 @@
               max="500"
               step="5"
               value="50"
+              title="Drag to select MCTS simulation count (speed vs deliberation)"
             />
             <div class="range-labels">
-              <span>Fast</span><span>Deliberate</span>
+              <span>Fast (5)</span><span>Deliberate (500)</span>
             </div>
+
             <div class="segmented" role="group" aria-label="Board size">
-              <button class="seg active" data-board="12" type="button">
-                12 x 12</button
-              ><button class="seg" data-board="5" type="button">5 x 5</button>
+              <button class="seg active" data-board="12" type="button" title="Standard 12x12 practice board">
+                12 x 12
+              </button>
+              <button class="seg" data-board="5" type="button" title="Fast 5x5 tactical board">
+                5 x 5
+              </button>
             </div>
+
             <div class="segmented" role="group" aria-label="Player colour">
-              <button class="seg active" data-color="1" type="button">
-                <i class="stone-dot black"></i> Black</button
-              ><button class="seg" data-color="-1" type="button">
+              <button class="seg active" data-color="1" type="button" title="Play Black (moves first)">
+                <i class="stone-dot black"></i> Black
+              </button>
+              <button class="seg" data-color="-1" type="button" title="Play White (receives Komi offset)">
                 <i class="stone-dot white"></i> White
               </button>
             </div>
+
             <button
               class="button button-primary full"
               id="new-game"
               type="button"
+              title="Start a fresh match with selected parameters (Enter)"
             >
               <span>Start new game</span><b>Enter</b>
             </button>
+
             <div class="selection-summary">
-              <span>ACTIVE CHECKPOINT</span
-              ><strong id="active-model">Waiting for engine</strong
-              ><small id="active-config">-- simulations / move</small>
+              <span>ACTIVE CHECKPOINT</span>
+              <strong id="active-model">Waiting for engine</strong>
+              <small id="active-config">-- simulations / move</small>
             </div>
+
             <div class="panel-footnote">
-              <span class="jade-mark"></span
-              ><span>Weights load on demand from the live backend.</span>
+              <span class="jade-mark"></span>
+              <span>Weights load on demand from the live backend.</span>
             </div>
           </aside>
+
+          <!-- Board Area -->
           <section class="board-column">
             <div class="board-meta">
-              <span class="turn-chip" id="turn-chip"
-                ><i class="stone-dot black"></i> Black to move</span
-              ><span class="mono" id="game-clock">GAME 001 / MOVE 00</span>
+              <span class="turn-chip" id="turn-chip">
+                <i class="stone-dot black"></i> Black to move
+              </span>
+              <span class="mono" id="game-clock">GAME 001 / MOVE 00</span>
             </div>
+
             <div class="board-frame">
               <div class="board-shell" id="board-shell">
                 <svg
@@ -131,46 +178,70 @@
                 ></svg>
                 <div class="board-thinking hidden" id="board-thinking">
                   <div class="ring"></div>
-                  <strong>Searching</strong><span id="think-time">0.0s</span
-                  ><button id="cancel-thinking" type="button">
+                  <strong>Searching</strong>
+                  <span id="think-time">0.0s</span>
+                  <button id="cancel-thinking" type="button">
                     Stop waiting
                   </button>
                 </div>
               </div>
             </div>
+
             <div class="board-caption">
-              <span><b id="board-size-label">12 x 12</b> kaya board</span
-              ><span class="mono">A B C D E F G H J K L M</span>
+              <span><b id="board-size-label">12 x 12</b> kaya board</span>
+              <span class="mono">A B C D E F G H J K L M</span>
             </div>
+
+            <!-- Interactive Action Controls with Tooltips -->
             <div class="board-actions">
               <button
                 class="button button-quiet"
                 data-action="pass"
                 type="button"
+                title="Pass your turn to opponent. Two consecutive passes end the game (P)"
               >
-                Pass <kbd>P</kbd></button
-              ><button
+                Pass <kbd>P</kbd>
+              </button>
+              <button
                 class="button button-quiet"
                 data-action="undo"
                 type="button"
+                title="Revert last human move and AI response (U)"
               >
-                Undo <kbd>U</kbd></button
-              ><button
+                Undo <kbd>U</kbd>
+              </button>
+              <button
                 class="button button-quiet"
                 data-action="hint"
                 type="button"
+                title="Ask AlphaGo Zero for recommended move & win probability (H)"
               >
-                Hint <kbd>H</kbd></button
-              ><button
+                Hint <kbd>H</kbd>
+              </button>
+              <button
                 class="button button-primary"
                 data-action="ai"
                 type="button"
+                title="Force AI to make a move immediately for active player (Space)"
               >
                 AI play <span>-&gt;</span>
               </button>
             </div>
+
+            <!-- Visible Keyboard Shortcuts Bar -->
+            <div class="shortcuts-strip">
+              <span>Shortcuts:</span>
+              <span><kbd>Enter</kbd> New Game</span>
+              <span><kbd>P</kbd> Pass</span>
+              <span><kbd>U</kbd> Undo</span>
+              <span><kbd>H</kbd> Hint</span>
+              <span><kbd>Space</kbd> AI Move</span>
+            </div>
           </section>
+
+          <!-- Right Telemetry & Score Stack -->
           <aside class="right-stack">
+            <!-- Position Balance Card -->
             <section class="panel score-panel">
               <div class="panel-heading">
                 <div>
@@ -181,18 +252,15 @@
               </div>
               <div class="value-bar"><span id="value-fill"></span></div>
               <div class="value-legend">
-                <span
-                  ><i class="dot black"></i>Black
-                  <b id="black-prob">50.0%</b></span
-                ><span
-                  ><i class="dot white"></i>White
-                  <b id="white-prob">50.0%</b></span
-                >
+                <span><i class="dot black"></i>Black <b id="black-prob">50.0%</b></span>
+                <span><i class="dot white"></i>White <b id="white-prob">50.0%</b></span>
               </div>
               <div class="chart-wrap">
                 <canvas id="value-chart" height="74"></canvas>
               </div>
             </section>
+
+            <!-- Match Record Card -->
             <section class="panel history-panel">
               <div class="panel-heading">
                 <div>
@@ -206,6 +274,8 @@
                 <div class="skeleton-line short"></div>
               </div>
             </section>
+
+            <!-- Search Telemetry Card with Speed Profiling -->
             <section class="panel telemetry-panel">
               <div class="panel-heading">
                 <div>
@@ -220,12 +290,20 @@
                   <dd id="telemetry-model">--</dd>
                 </div>
                 <div>
+                  <dt>Strength</dt>
+                  <dd id="telemetry-elo">--</dd>
+                </div>
+                <div>
                   <dt>Simulations</dt>
                   <dd id="telemetry-sims">--</dd>
                 </div>
                 <div>
                   <dt>Last search</dt>
                   <dd id="telemetry-time">--</dd>
+                </div>
+                <div>
+                  <dt>Search speed</dt>
+                  <dd id="telemetry-speed">--</dd>
                 </div>
                 <div>
                   <dt>Passes</dt>
@@ -235,6 +313,8 @@
             </section>
           </aside>
         </div>
+
+        <!-- Bottom Cards -->
         <div class="bottom-grid">
           <section class="panel player-card black-card">
             <div class="large-stone black"></div>
@@ -245,6 +325,7 @@
             </div>
             <strong>YOUR SIDE</strong>
           </section>
+
           <section class="panel player-card white-card">
             <div class="large-stone white"></div>
             <div>
@@ -254,10 +335,11 @@
             </div>
             <strong>POLICY NETWORK</strong>
           </section>
+
           <section class="panel insight-card">
             <p class="eyebrow">SEARCH NOTE</p>
             <p id="hint-copy">
-              The value head will describe the position after the first move.
+              The value head evaluates position balance after every move.
             </p>
             <button class="text-button" id="show-thinking" type="button" hidden>
               Show top visits <span>-&gt;</span>
@@ -265,6 +347,8 @@
           </section>
         </div>
       </section>
+
+      <!-- Section 2: Self-Play -->
       <section class="tab-panel" id="panel-selfplay" data-panel="selfplay">
         <div class="page-heading">
           <div>
@@ -272,11 +356,12 @@
             <h1>Watch the policy<br /><em>teach itself.</em></h1>
           </div>
           <div class="heading-note">
-            <span class="live-dot amber"></span
-            ><span>Telemetry from /api/selfplay_status</span
-            ><small>Every value comes from the running engine.</small>
+            <span class="live-dot amber"></span>
+            <span>Telemetry from /api/selfplay_status</span>
+            <small id="selfplay-auth-notice">Public monitoring mode. Admin key required to trigger heavy jobs.</small>
           </div>
         </div>
+
         <div class="feature-grid">
           <section class="panel selfplay-config">
             <div class="panel-heading">
@@ -284,54 +369,24 @@
                 <p class="eyebrow">SELF-PLAY CONFIGURATION</p>
                 <h2>Two policies, one board</h2>
               </div>
+              <span class="admin-badge" id="sp-admin-badge">Public (Read-Only)</span>
             </div>
             <div class="form-grid">
-              <label
-                >Black model<select
-                  class="select"
-                  id="sp-model-black"
-                ></select></label
-              ><label
-                >White model<select
-                  class="select"
-                  id="sp-model-white"
-                ></select></label
-              ><label
-                >Black sims<input
-                  class="input"
-                  id="sp-sims-black"
-                  type="number"
-                  value="25"
-                  min="1" /></label
-              ><label
-                >White sims<input
-                  class="input"
-                  id="sp-sims-white"
-                  type="number"
-                  value="25"
-                  min="1" /></label
-              ><label
-                >Temperature<input
-                  class="input"
-                  id="sp-temp-black"
-                  type="number"
-                  value="1"
-                  step="0.1" /></label
-              ><label
-                >Threshold<input
-                  class="input"
-                  id="sp-temp-threshold"
-                  type="number"
-                  value="30"
-                  min="1"
-              /></label>
+              <label>Black model<select class="select" id="sp-model-black"></select></label>
+              <label>White model<select class="select" id="sp-model-white"></select></label>
+              <label>Black sims<input class="input" id="sp-sims-black" type="number" value="25" min="1" /></label>
+              <label>White sims<input class="input" id="sp-sims-white" type="number" value="25" min="1" /></label>
+              <label>Temperature<input class="input" id="sp-temp-black" type="number" value="1" step="0.1" /></label>
+              <label>Threshold<input class="input" id="sp-temp-threshold" type="number" value="30" min="1" /></label>
             </div>
             <div class="inline-actions">
               <button class="button button-primary" id="sp-start" type="button">
-                Start self-play</button
-              ><button class="button button-quiet" id="sp-step" type="button">
-                Step once</button
-              ><button class="button button-quiet" id="sp-save" type="button">
+                Start self-play
+              </button>
+              <button class="button button-quiet" id="sp-step" type="button">
+                Step once
+              </button>
+              <button class="button button-quiet" id="sp-save" type="button">
                 Save data
               </button>
               <button class="button button-quiet" id="sp-train" type="button">
@@ -339,6 +394,7 @@
               </button>
             </div>
           </section>
+
           <section class="panel pipeline-panel">
             <div class="panel-heading">
               <div>
@@ -347,25 +403,20 @@
               </div>
             </div>
             <div class="pipeline">
-              <div class="pipeline-step active">
-                <b>01</b><span>Self-play</span>
-              </div>
+              <div class="pipeline-step active"><b>01</b><span>Self-play</span></div>
               <div class="pipeline-step"><b>02</b><span>Training</span></div>
               <div class="pipeline-step"><b>03</b><span>Evaluation</span></div>
               <div class="pipeline-step"><b>04</b><span>Promote</span></div>
             </div>
             <div class="stat-grid">
-              <div>
-                <small>Iteration</small><strong id="sp-iteration">--</strong>
-              </div>
+              <div><small>Iteration</small><strong id="sp-iteration">--</strong></div>
               <div><small>Games</small><strong id="sp-games">--</strong></div>
-              <div>
-                <small>Examples</small><strong id="sp-examples">--</strong>
-              </div>
+              <div><small>Examples</small><strong id="sp-examples">--</strong></div>
               <div><small>Models</small><strong id="sp-models">--</strong></div>
             </div>
           </section>
         </div>
+
         <div class="feature-grid">
           <section class="panel log-panel">
             <div class="panel-heading">
@@ -385,11 +436,14 @@
               </div>
             </div>
             <div class="checkpoint-grid" id="checkpoint-grid">
-              <p class="muted">Loading reported checkpoints...</p>
+              <div class="skeleton-box"></div>
+              <div class="skeleton-box"></div>
             </div>
           </section>
         </div>
       </section>
+
+      <!-- Section 3: Evaluation -->
       <section class="tab-panel" id="panel-evaluation" data-panel="evaluation">
         <div class="page-heading">
           <div>
@@ -397,35 +451,32 @@
             <h1>Measure the<br /><em>next generation.</em></h1>
           </div>
           <div class="heading-note">
-            <span class="live-dot jade"></span
-            ><span>Promotion threshold 55%</span
-            ><small>Models and outcomes are reported by the backend.</small>
+            <span class="live-dot jade"></span>
+            <span>Promotion threshold 55%</span>
+            <small>Head-to-head match stats & Elo leaderboard.</small>
           </div>
         </div>
+
         <section class="panel eval-config">
           <div class="form-grid eval-fields">
-            <label
-              >Model A<select class="select" id="eval-model-a"></select></label
-            ><label
-              >Model B<select class="select" id="eval-model-b"></select></label
-            ><label
-              >Games<input
-                class="input"
-                id="eval-games"
-                type="number"
-                value="10"
-                min="1" /></label
-            ><label
-              >Board<select class="select" id="eval-board">
-                <option value="12">12 x 12</option>
-                <option value="5">5 x 5</option>
-              </select></label
-            >
+            <label>Model A<select class="select" id="eval-model-a"></select></label>
+            <label>Model B<select class="select" id="eval-model-b"></select></label>
+            <label>Games<input class="input" id="eval-games" type="number" value="20" min="1" /></label>
+            <label>Board<select class="select" id="eval-board">
+              <option value="12">12 x 12</option>
+              <option value="5">5 x 5</option>
+            </select></label>
           </div>
-          <button class="button button-primary" id="eval-start" type="button">
-            Run evaluation <span>-&gt;</span>
-          </button>
+          <div class="eval-actions-group" style="display:flex;flex-direction:column;gap:10px;min-width:180px;">
+            <button class="button button-quiet" id="eval-admin-unlock" type="button" style="border-color:var(--amber);color:var(--amber);">
+              🔐 Unlock Admin Mode
+            </button>
+            <button class="button button-primary" id="eval-start" type="button" style="width:100%;">
+              Run evaluation <span>-&gt;</span>
+            </button>
+          </div>
         </section>
+
         <div class="eval-grid">
           <section class="panel h2h-panel">
             <div class="panel-heading">
@@ -448,15 +499,16 @@
               <span id="match-a"></span><span id="match-b"></span>
             </div>
             <div class="h2h-footer">
-              <span id="draws">0 draws</span
-              ><b id="promotion-badge">Not evaluated</b>
+              <span id="draws">0 draws</span>
+              <b id="promotion-badge">Not evaluated</b>
             </div>
           </section>
+
           <section class="panel leaderboard-panel">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">RANKED CHECKPOINTS</p>
-                <h2>Leaderboard</h2>
+                <h2>Elo Leaderboard</h2>
               </div>
             </div>
             <div class="table-scroll">
@@ -467,13 +519,13 @@
                     <th>Model</th>
                     <th>W-L-D</th>
                     <th>Win rate</th>
-                    <th>Elo</th>
+                    <th>Elo Rating</th>
                   </tr>
                 </thead>
                 <tbody id="leaderboard">
                   <tr>
                     <td colspan="5" class="muted">
-                      Loading reported results...
+                      <div class="skeleton-table"></div>
                     </td>
                   </tr>
                 </tbody>
@@ -482,6 +534,8 @@
           </section>
         </div>
       </section>
+
+      <!-- Section 4: Paper & Research -->
       <section class="tab-panel paper-panel" id="panel-paper">
         <div class="page-heading">
           <div>
@@ -489,31 +543,34 @@
             <h1>Scaled-down<br /><em>AlphaGo Zero.</em></h1>
           </div>
           <div class="heading-note">
-            <span class="live-dot amber"></span><span>Silver et al., 2017</span
-            ><small>Faithful loop, compact experiment.</small>
+            <span class="live-dot amber"></span>
+            <span>Silver et al., 2017</span>
+            <small>Faithful loop, compact experiment.</small>
           </div>
         </div>
+
         <section class="paper-loop panel">
           <div class="loop-node">
-            <span>01</span><b>Self-play</b
-            ><small>Generate positions and visit policies</small>
+            <span>01</span><b>Self-play</b>
+            <small>Generate positions and visit policies</small>
           </div>
           <i>-&gt;</i>
           <div class="loop-node">
-            <span>02</span><b>Train</b
-            ><small>Policy and value heads learn together</small>
+            <span>02</span><b>Train</b>
+            <small>Policy and value heads learn together</small>
           </div>
           <i>-&gt;</i>
           <div class="loop-node">
-            <span>03</span><b>Evaluate</b
-            ><small>Candidate plays the current best</small>
+            <span>03</span><b>Evaluate</b>
+            <small>Candidate plays the current best</small>
           </div>
           <i>-&gt;</i>
           <div class="loop-node">
-            <span>04</span><b>Promote</b
-            ><small>Keep the stronger checkpoint</small>
+            <span>04</span><b>Promote</b>
+            <small>Keep the stronger checkpoint</small>
           </div>
         </section>
+
         <section class="panel paper-table">
           <div class="panel-heading">
             <div>
@@ -526,16 +583,13 @@
               <span>Board</span><b>19 x 19</b><strong>12 x 12 or 5 x 5</strong>
             </div>
             <div>
-              <span>Network</span><b>20 or 40 residual blocks</b
-              ><strong>Compact CNN</strong>
+              <span>Network</span><b>20 or 40 residual blocks</b><strong>3 Compact ResNet Blocks</strong>
             </div>
             <div>
-              <span>Search</span><b>1,600 simulations / move</b
-              ><strong>Configurable MCTS</strong>
+              <span>Search</span><b>1,600 simulations / move</b><strong>Configurable MCTS (5 - 500)</strong>
             </div>
             <div>
-              <span>Training</span><b>Millions of positions</b
-              ><strong>Local checkpoints</strong>
+              <span>Training</span><b>Millions of positions</b><strong>Local PyTorch Checkpoints</strong>
             </div>
           </div>
           <p class="paper-note">
@@ -546,42 +600,130 @@
         </section>
       </section>
     </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <div class="footer-inner">
+        <div class="footer-col">
+          <h3>AlphaGo Zero Arena</h3>
+          <p>A scaled-down Python/PyTorch replication of DeepMind's AlphaGo Zero (Silver et al. 2017) with live MCTS visualization & REST inference backend.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Model Card</h4>
+          <ul>
+            <li><strong>Architecture:</strong> Dual-head ResNet (3 Residual Blocks)</li>
+            <li><strong>Input Planes:</strong> 3 (Current, Opponent, Empty)</li>
+            <li><strong>Board Sizes:</strong> 12x12 & 5x5 Kaya Boards</li>
+            <li><strong>Scoring:</strong> Territory Rules with Komi offset</li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Hosting Architecture</h4>
+          <ul>
+            <li><strong>Frontend:</strong> Hosted on Vercel static CDN</li>
+            <li><strong>Backend Engine:</strong> FastAPI on Render free tier</li>
+            <li><strong>Health Check:</strong> <a href="/health" target="_blank" rel="noopener">/health endpoint</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>AlphaGo Zero Arena &copy; 2026. Built for research & education.</span>
+        <a href="https://github.com" target="_blank" rel="noopener" class="footer-link">GitHub Source</a>
+      </div>
+    </footer>
+
+    <!-- Toast Notifications -->
     <div class="toast-stack" id="toasts" aria-live="polite"></div>
+
+    <!-- Game Over Breakdown Dialog -->
     <dialog class="dialog" id="game-dialog">
       <div class="dialog-inner">
-        <button
-          class="dialog-close"
-          data-close-dialog
-          type="button"
-          aria-label="Close"
-        >
-          x
-        </button>
+        <button class="dialog-close" data-close-dialog type="button" aria-label="Close">x</button>
         <p class="eyebrow">GAME COMPLETE</p>
         <h2 id="dialog-title">Game over</h2>
         <p id="dialog-copy"></p>
-        <div class="dialog-score">
-          <span>Black <b id="dialog-black">0</b></span
-          ><span>White <b id="dialog-white">0</b></span>
+        
+        <div class="score-breakdown">
+          <div class="score-row black">
+            <span class="player-name">Black (Human)</span>
+            <div class="score-details">
+              <span>Stones: <b id="dialog-black-stones">0</b></span>
+              <span>Territory: <b id="dialog-black-terr">0</b></span>
+              <span>Total: <b id="dialog-black" class="total">0</b></span>
+            </div>
+          </div>
+          <div class="score-row white">
+            <span class="player-name">White (AI)</span>
+            <div class="score-details">
+              <span>Stones: <b id="dialog-white-stones">0</b></span>
+              <span>Territory: <b id="dialog-white-terr">0</b></span>
+              <span>Komi: <b id="dialog-komi">+7.5</b></span>
+              <span>Total: <b id="dialog-white" class="total">0</b></span>
+            </div>
+          </div>
         </div>
-        <button
-          class="button button-primary full"
-          id="dialog-new-game"
-          type="button"
-        >
+
+        <p class="rules-note">Scoring uses Chinese area rules. White receives Komi handicap for playing second.</p>
+        
+        <button class="button button-primary full" id="dialog-new-game" type="button">
           Play again
         </button>
       </div>
     </dialog>
-    +
+
+    <!-- How to Play / Rules Dialog -->
+    <dialog class="dialog dialog-wide" id="rules-dialog">
+      <div class="dialog-inner">
+        <button class="dialog-close" data-close-dialog type="button" aria-label="Close">x</button>
+        <p class="eyebrow">RULES & GUIDE</p>
+        <h2>How to Play Go</h2>
+        <div class="rules-grid">
+          <div class="rule-card">
+            <h3>1. Board & Territory</h3>
+            <p>Black moves first. Players alternate placing stones on line intersections. The goal is to surround empty intersections (territory) and capture opponent stones.</p>
+          </div>
+          <div class="rule-card">
+            <h3>2. Captures & Liberties</h3>
+            <p>Stones of the same color connected along lines form a group. A group is captured and removed when all its adjacent empty points (liberties) are occupied by enemy stones.</p>
+          </div>
+          <div class="rule-card">
+            <h3>3. Passing & Game End</h3>
+            <p>If you have no profitable move, click <strong>Pass</strong>. When both players pass consecutively, the match ends and total territory + stones are counted.</p>
+          </div>
+          <div class="rule-card">
+            <h3>4. Komi & MCTS Engine</h3>
+            <p>White receives bonus points (Komi: 7.5 on 12x12, 0.5 on 5x5) to offset Black's first-move advantage. Higher MCTS simulations increase AI tactical strength.</p>
+          </div>
+        </div>
+        <button class="button button-primary full" data-close-dialog type="button">Got it, let's play!</button>
+      </div>
+    </dialog>
+
+    <!-- Admin Authentication Modal -->
+    <dialog class="dialog" id="admin-dialog">
+      <div class="dialog-inner">
+        <button class="dialog-close" data-close-dialog type="button" aria-label="Close">x</button>
+        <p class="eyebrow">ADMIN AUTHENTICATION</p>
+        <h2>Unlock Admin Actions</h2>
+        <p>Self-play generation, model training, and evaluation benchmarks write to server disk and require an admin passcode to prevent public server overload.</p>
+        
+        <label class="field-label" for="admin-passcode-input">Admin Passcode</label>
+        <input class="input" id="admin-passcode-input" type="password" placeholder="Enter admin passcode..." />
+        
+        <div class="admin-modal-actions">
+          <button class="button button-primary full" id="admin-unlock-btn" type="button">Unlock Admin Mode</button>
+          <button class="button button-quiet full" id="admin-clear-btn" type="button">Lock / Clear Saved Key</button>
+        </div>
+      </div>
+    </dialog>
+
     <script>
       const API_BASE = location.hostname.endsWith("vercel.app")
         ? "https://alphago-zero.onrender.com"
-        : "";
+        : (location.protocol === "file:" || (location.port !== "9000" && location.hostname === "localhost"))
+          ? "http://localhost:9000"
+          : "";
     </script>
-    +
     <script type="module" src="app.js"></script>
-    +
   </body>
-  +
 </html>
