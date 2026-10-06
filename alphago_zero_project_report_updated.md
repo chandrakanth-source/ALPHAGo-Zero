@@ -91,7 +91,29 @@ Files already tracked by Git must still be removed from the index (`git rm --cac
 
 ---
 
-## ▶️ 5. Remaining Work
+## 🐞 5. Critical Bugs Found During Stage 2 Training
+
+### Bug 1 — MCTS backup sign: the search chose the opponent's best move
+- **Symptom**: the first stage 2 candidate lost **0–20** to the previous model, as both Black and White.
+- **Cause**: `MCTS.backup()` stored each node's value from the perspective of the player *to move at that node* (the opponent of the player choosing it), while `select_child()` maximises `child.value()`. The search therefore steered towards moves that were best for the opponent. Older models had near-random value heads, which hid the bug; once a model learned an accurate value head, it played close to the worst moves.
+- **Fix**: the leaf value is negated once before backing up, so each node stores value from the perspective of the player who moved into it. With the fix, the same candidate went **9–11** instead of 0–20. A regression test (`tests/test_mcts_plays_for_itself.py`) fails on the old code and passes on the new.
+- This fix also corrects the AI's move choice in the web app.
+
+### Bug 2 — Network input mismatch between training and search
+- **Cause**: self-play stored positions as `[own stones, opponent stones, empty points]`, but `NetworkEvaluator` (used by every search) built the third plane as a constant *"Black to move"* plane. Every model was trained on one input format and played with another.
+- **Fix**: the evaluator now builds the same `empty points` plane as the training data and the web server.
+
+### Related fixes
+- **Double softmax in the policy loss**: the network already outputs probabilities, and the loss applied `log_softmax` again, which weakened the policy gradient. The trainer now passes log-probabilities.
+- **Deterministic evaluation**: evaluation games had no randomness, so 20 games were really 2 repeated games, and they were cut off at 200 moves. The first 8 moves are now sampled from visit counts, and the cap is 500 moves.
+- **Silent random-model fallback**: `load_model` falls back to random weights if loading fails; the batched trainer now verifies every model loads strictly.
+- **Dirichlet root noise**: the report claimed it, but it was missing; it is now added to self-play.
+
+**Effect**: after the fixes, self-play games finish naturally in about 150 moves instead of hitting the 500-move cap, and self-play is about 3× faster (≈1.8 min per 25-game batch). All stage 2 data generated before the fixes was archived and regenerated.
+
+---
+
+## ▶️ 6. Remaining Work
 1. Run `python train_master_curriculum.py --all` (long-running) to produce the stage 2–5 models.
 2. Replace polling with WebSockets for live self-play streaming.
 3. Decide on Git LFS vs. ignoring models, then clean already-tracked large files from history.
