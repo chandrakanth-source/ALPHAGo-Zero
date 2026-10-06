@@ -3,3 +3,8 @@ data/*.pt
 training/checkpoints/*.pt
 __pycache__/
 *.pyc
+data/batches/
+training/smoke_run/
+training/batched_state.json
+models/latest_model.before_stage*.pt
+training/*.log
