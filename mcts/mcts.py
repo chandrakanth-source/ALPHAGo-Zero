@@ -290,6 +290,12 @@ class MCTS:
 
         current = node
 
+        # *value* is from the perspective of the player to move at *node*.
+        # Each node stores value from the perspective of the player who made
+        # the move into it (its parent's mover), so select_child, which
+        # maximises child.value(), picks moves good for the player choosing.
+        value = -value
+
         while current is not None:
 
             current.visit_count += 1
