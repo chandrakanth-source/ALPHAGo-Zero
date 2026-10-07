@@ -37,7 +37,7 @@ STAGES = {
     4: dict(iterations=[7, 8], games=850, sims=80, epochs=6),
     5: dict(iterations=[9, 10], games=1000, sims=100, epochs=8),
 }
-EVAL_GAMES = 20
+EVAL_GAMES = 40
 
 
 def log(msg):
