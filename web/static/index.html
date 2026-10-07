@@ -194,6 +194,24 @@
 
             <!-- Interactive Action Controls with Tooltips -->
             <div class="board-actions">
+              <div class="move-entry-group" style="display: flex; align-items: center; gap: 6px;">
+                <input
+                  class="input input-sm"
+                  id="move-input"
+                  type="text"
+                  placeholder="e.g. D4 or 4,4"
+                  style="width: 110px; padding: 6px 10px; font-size: 13px;"
+                  title="Type board coordinate (e.g., D4, F6, or 4,4)"
+                />
+                <button
+                  class="button button-primary btn-sm"
+                  id="place-move-btn"
+                  type="button"
+                  title="Place stone at entered coordinate"
+                >
+                  Place Stone
+                </button>
+              </div>
               <button
                 class="button button-quiet"
                 data-action="pass"
@@ -725,13 +743,6 @@
       </div>
     </dialog>
 
-    <script>
-      const API_BASE = location.hostname.endsWith("vercel.app")
-        ? "https://alphago-zero.onrender.com"
-        : (location.protocol === "file:" || (location.port !== "9000" && location.hostname === "localhost"))
-          ? "http://localhost:9000"
-          : "";
-    </script>
-    <script type="module" src="app.js?v=3"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

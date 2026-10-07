@@ -30,10 +30,7 @@ from main import run_pipeline
 INTERMEDIATE_STAGE_CONFIG = {
     "stage": 2,
     "name": "Intermediate Level",
-<<<<<<< HEAD
     "start_iteration": 3,
-=======
->>>>>>> origin/shafreed
     "iterations": 2,           # Iterations 3 & 4
     "simulations": 35,          # 35 MCTS simulations per move
     "self_play_games": 400,     # 400 games per iteration
@@ -74,12 +71,8 @@ def run_intermediate_level_training(board_size: int = BOARD_SIZE):
             batch_size=BATCH_SIZE,
             eval_games=EVALUATION_GAMES,
             promotion_threshold=PROMOTION_THRESHOLD,
-<<<<<<< HEAD
             force_fresh=False,
             start_iteration=cfg["start_iteration"] + i - 1
-=======
-            force_fresh=False
->>>>>>> origin/shafreed
         )
 
         elapsed_iter = time.time() - t0

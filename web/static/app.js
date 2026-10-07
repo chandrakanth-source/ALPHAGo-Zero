@@ -1,9 +1,9 @@
 // AlphaGo Zero Arena Frontend Client
 const API_BASE = location.hostname.endsWith("vercel.app")
   ? "https://alphago-zero.onrender.com"
-  : (location.protocol === "file:" || (location.port !== "9000" && location.hostname === "localhost"))
-    ? "http://localhost:9000"
-    : "";
+  : (location.protocol === "http:" || location.protocol === "https:")
+    ? ""
+    : "http://127.0.0.1:9000";
 
 const MOCK = new URLSearchParams(location.search).get("mock") === "1";
 const $ = (selector) => document.querySelector(selector);
@@ -53,7 +53,7 @@ function getModelElo(filename) {
 }
 
 function mockIterations() {
-  return [0, 1, 2, 3, 5, 10, 20].map((iteration) => ({
+  return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 50, 100].map((iteration) => ({
     iteration,
     filename: `model_iteration_${iteration}.pt`,
     size_kb: 3020,
@@ -64,6 +64,12 @@ function mockGame() {
   const board = Array.from({ length: state.boardSize }, () =>
     Array(state.boardSize).fill(0),
   );
+  const legal_moves = [];
+  for (let r = 0; r < state.boardSize; r++) {
+    for (let c = 0; c < state.boardSize; c++) {
+      if (board[r][c] === 0) legal_moves.push([r, c]);
+    }
+  }
   return {
     active: true,
     board_size: state.boardSize,
@@ -77,7 +83,7 @@ function mockGame() {
     white_score: 0,
     black_stones: 0,
     white_stones: 0,
-    legal_moves: [],
+    legal_moves,
     move_history: [],
     last_ai_move: null,
     ai_win_prob_black: 0.5,
@@ -90,7 +96,7 @@ function mockGame() {
 
 async function mockRequest(endpoint, method, data) {
   if (endpoint.startsWith("/api/iterations"))
-    return { iterations: mockIterations(), count: 7 };
+    return { iterations: mockIterations(), count: mockIterations().length };
   if (endpoint.startsWith("/api/levels"))
     return {
       current_board_size: state.boardSize,
@@ -106,24 +112,65 @@ async function mockRequest(endpoint, method, data) {
   if (endpoint === "/api/verify_admin")
     return { valid: data?.token === "alphago2026", message: "Mock admin check" };
   if (endpoint === "/api/new_game") {
-    Object.assign(state, {
-      boardSize: data.board_size,
-      humanColor: data.human_color,
-      simulations: data.simulations,
-      modelFile: data.model_file || "model_iteration_1.pt",
-      moveHistory: [],
-      moveNumber: 0,
-      lastAiMove: null,
-    });
-    return mockGame();
+    state.mockGameObj = mockGame();
+    if (data?.human_color === -1) {
+      state.mockGameObj.board[3][3] = 1;
+      state.mockGameObj.move_history.push({
+        player: "AI",
+        color: 1,
+        action: "D4",
+        coords: [3, 3],
+        time: 0.1,
+        win_prob_black: 0.52
+      });
+      state.mockGameObj.current_player = -1;
+      state.mockGameObj.last_ai_move = [3, 3];
+    }
+    return state.mockGameObj;
   }
-  if (endpoint === "/api/state") return mockGame();
-  if (
-    endpoint === "/api/move" ||
-    endpoint === "/api/ai_move" ||
-    endpoint === "/api/undo"
-  )
-    return mockGame();
+  if (endpoint === "/api/state") return state.mockGameObj || mockGame();
+  if (endpoint === "/api/move") {
+    if (!state.mockGameObj) state.mockGameObj = mockGame();
+    const g = state.mockGameObj;
+    if (data?.is_pass) {
+      g.move_history.push({ player: "Human", color: state.humanColor, action: "PASS", coords: null });
+    } else if (data?.row != null && data?.col != null) {
+      g.board[data.row][data.col] = state.humanColor;
+      const moveName = `${String.fromCharCode(65 + data.col)}${data.row + 1}`;
+      g.move_history.push({ player: "Human", color: state.humanColor, action: moveName, coords: [data.row, data.col] });
+      g.current_player = -state.humanColor;
+      const aiR = (data.row + 2) % state.boardSize;
+      const aiC = (data.col + 2) % state.boardSize;
+      if (g.board[aiR][aiC] === 0) {
+        g.board[aiR][aiC] = -state.humanColor;
+        const aiMoveName = `${String.fromCharCode(65 + aiC)}${aiR + 1}`;
+        g.last_ai_move = [aiR, aiC];
+        g.move_history.push({ player: "AI", color: -state.humanColor, action: aiMoveName, coords: [aiR, aiC], time: 0.15, win_prob_black: 0.5 });
+        g.current_player = state.humanColor;
+      }
+    }
+    const legals = [];
+    for (let r = 0; r < state.boardSize; r++) {
+      for (let c = 0; c < state.boardSize; c++) {
+        if (g.board[r][c] === 0) legals.push([r, c]);
+      }
+    }
+    g.legal_moves = legals;
+    return g;
+  }
+  if (endpoint === "/api/undo") {
+    if (!state.mockGameObj) state.mockGameObj = mockGame();
+    const g = state.mockGameObj;
+    const last = g.move_history.pop();
+    if (last?.coords) g.board[last.coords[0]][last.coords[1]] = 0;
+    g.current_player = state.humanColor;
+    g.last_ai_move = null;
+    g.legal_moves = g.board.flatMap((row, r) =>
+      row.map((cell, c) => (cell === 0 ? [r, c] : null)).filter(Boolean),
+    );
+    return g;
+  }
+  if (endpoint === "/api/ai_move") return state.mockGameObj || mockGame();
   if (endpoint === "/api/hint")
     return {
       coords: [
@@ -295,6 +342,7 @@ async function wakeEngine() {
     clearTimeout(timeoutId);
     clearInterval(wakeTimer);
     setWakeProgress(100, "Engine online. Loading reported checkpoints.");
+    $("#engine-overlay").classList.add("ready");
     await boot();
   } catch (error) {
     clearInterval(wakeTimer);
@@ -324,6 +372,7 @@ function enableDemoMode() {
 }
 
 async function boot() {
+  $("#engine-overlay").classList.add("ready");
   try {
     updateAdminUI();
     await Promise.all([loadIterations(), loadLevels(), loadEvaluation()]);
@@ -332,7 +381,6 @@ async function boot() {
     $("#mode-note").textContent = state.mock
       ? "Offline Demo Mode"
       : "MCTS inference ready";
-    $("#engine-overlay").classList.add("ready");
   } catch (error) {
     setEngineStatus("Engine error", false);
     toast(error.message);
@@ -412,9 +460,13 @@ async function loadIterations() {
   });
 
   if (state.iterations.length) {
-    state.modelFile = state.iterations[0].filename;
+    const preferred =
+      state.iterations.find((item) => item.iteration === 7) ||
+      state.iterations.find((item) => item.iteration === 3) ||
+      state.iterations[0];
+    state.modelFile = preferred.filename;
     if ($("#model-select")) $("#model-select").value = state.modelFile;
-    if ($("#eval-model-a")) $("#eval-model-a").value = state.iterations[0].filename;
+    if ($("#eval-model-a")) $("#eval-model-a").value = preferred.filename;
     if ($("#eval-model-b"))
       $("#eval-model-b").value = state.iterations.at(-1).filename;
   }
@@ -573,6 +625,7 @@ function buildBoard() {
   grid.setAttribute("stroke", "#4f2d16");
   grid.setAttribute("stroke-width", "1.5");
   grid.setAttribute("opacity", ".88");
+  grid.setAttribute("pointer-events", "none");
 
   for (let index = 0; index < size; index += 1) {
     const position = margin + index * step;
@@ -594,6 +647,7 @@ function buildBoard() {
 
   const points = document.createElementNS(ns, "g");
   points.setAttribute("fill", "#3d210e");
+  points.setAttribute("pointer-events", "none");
   starPoints(size).forEach(([row, col]) => {
     const point = document.createElementNS(ns, "circle");
     point.setAttribute("cx", margin + col * step);
@@ -607,6 +661,7 @@ function buildBoard() {
   labels.setAttribute("fill", "#5b351a");
   labels.setAttribute("font-size", "12");
   labels.setAttribute("font-family", "JetBrains Mono, monospace");
+  labels.setAttribute("pointer-events", "none");
 
   for (let index = 0; index < size; index += 1) {
     const x = margin + index * step;
@@ -643,6 +698,12 @@ function buildBoard() {
       );
       group.classList.add("intersection");
       group.addEventListener("click", () => playMove(row, col));
+
+      const hitTarget = document.createElementNS(ns, "circle");
+      hitTarget.setAttribute("r", step * 0.48);
+      hitTarget.setAttribute("fill", "transparent");
+      hitTarget.setAttribute("pointer-events", "all");
+      group.append(hitTarget);
 
       const ghost = document.createElementNS(ns, "circle");
       ghost.setAttribute("r", step * 0.39);
@@ -693,8 +754,10 @@ function renderBoard() {
     );
     stone.style.display = value ? "block" : "none";
     const prob = heatMap.get(key);
-    heat.style.display = prob && !value ? "block" : "none";
-    if (prob) heat.setAttribute("opacity", (0.15 + 0.6 * (prob / heatMax)).toFixed(2));
+    if (heat) {
+      heat.style.display = prob && !value ? "block" : "none";
+      if (prob) heat.setAttribute("opacity", (0.15 + 0.6 * (prob / heatMax)).toFixed(2));
+    }
     last.style.display =
       state.lastAiMove?.[0] === row && state.lastAiMove?.[1] === col
         ? "block"
@@ -796,6 +859,26 @@ async function playMove(row, col) {
   );
 }
 
+function passMove() {
+  if (state.thinking || state.gameOver) return;
+  performAction(
+    "/api/move",
+    "POST",
+    { is_pass: true },
+    "Pass could not be completed",
+  );
+}
+
+function undoMove() {
+  if (state.thinking) return;
+  performAction("/api/undo", "POST", null, "Undo could not be completed");
+}
+
+function aiMove() {
+  if (state.thinking || state.gameOver) return;
+  performAction("/api/ai_move", "POST", null, "AI move could not be completed");
+}
+
 async function performAction(endpoint, method, data, fallback) {
   setThinking(true);
   try {
@@ -808,21 +891,6 @@ async function performAction(endpoint, method, data, fallback) {
   } finally {
     setThinking(false);
   }
-}
-
-async function passMove() {
-  if (!state.thinking && !state.gameOver)
-    await performAction("/api/move", "POST", { is_pass: true }, "Pass failed");
-}
-
-async function undoMove() {
-  if (!state.thinking)
-    await performAction("/api/undo", "POST", null, "Undo failed");
-}
-
-async function aiMove() {
-  if (!state.thinking && !state.gameOver)
-    await performAction("/api/ai_move", "POST", null, "AI move failed");
 }
 
 function exportSgf() {
@@ -848,6 +916,50 @@ async function hint() {
   } catch (error) {
     toast(`Hint unavailable: ${error.message}`);
   }
+}
+
+function parseCoordinate(input) {
+  if (!input) return null;
+  const str = input.trim().toUpperCase();
+  const letters = "ABCDEFGHJKLMNOPQRST";
+  
+  // Format "D4" or "D-4" or "D 4"
+  const matchAlphaNum = str.match(/^([A-Z])[-_\s]?(\d+)$/);
+  if (matchAlphaNum) {
+    const colStr = matchAlphaNum[1];
+    const rowNum = parseInt(matchAlphaNum[2], 10);
+    const col = letters.indexOf(colStr);
+    const row = rowNum - 1;
+    if (col >= 0 && col < state.boardSize && row >= 0 && row < state.boardSize) {
+      return [row, col];
+    }
+  }
+  
+  // Format "4,4" or "3,3"
+  const matchNumNum = str.match(/^(\d+)[,;\s]+(\d+)$/);
+  if (matchNumNum) {
+    const row = parseInt(matchNumNum[1], 10) - 1;
+    const col = parseInt(matchNumNum[2], 10) - 1;
+    if (col >= 0 && col < state.boardSize && row >= 0 && row < state.boardSize) {
+      return [row, col];
+    }
+  }
+
+  return null;
+}
+
+function placeMoveFromInput() {
+  const inputEl = $("#move-input");
+  if (!inputEl) return;
+  const val = inputEl.value;
+  const coords = parseCoordinate(val);
+  if (!coords) {
+    toast(`Invalid coordinate "${val}". Use e.g. D4, F6, or 4,4`);
+    return;
+  }
+  const [row, col] = coords;
+  playMove(row, col);
+  inputEl.value = "";
 }
 
 function showGameOver(data) {
@@ -1171,6 +1283,14 @@ function bind() {
   $("[data-action=hint]")?.addEventListener("click", hint);
   $("[data-action=sgf]")?.addEventListener("click", exportSgf);
   $("[data-action=ai]")?.addEventListener("click", aiMove);
+  
+  $("#place-move-btn")?.addEventListener("click", placeMoveFromInput);
+  $("#move-input")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      placeMoveFromInput();
+    }
+  });
 
   $("#cancel-thinking")?.addEventListener("click", () =>
     toast(

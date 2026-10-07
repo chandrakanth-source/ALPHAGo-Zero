@@ -71,11 +71,7 @@ def test_full_selfplay_train_loop(tmp_path):
 
     # Weights should have changed.
     changed = any(
-<<<<<<< HEAD
-        not torch.equal(model.state_dict()[k], before[k])
-=======
         not torch.equal(model.state_dict()[k].cpu(), before[k].cpu())
->>>>>>> origin/shafreed
         for k in before
     )
     assert changed, "Model weights did not update during training"
