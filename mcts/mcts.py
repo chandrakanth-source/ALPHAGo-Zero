@@ -53,13 +53,9 @@ class MCTS:
         game=None,
         board_size=None,
         simulations=100,
-<<<<<<< HEAD
-        c_puct=1.5
-=======
         c_puct=1.5,
         dirichlet_alpha=None,
         dirichlet_eps=0.25
->>>>>>> origin/shafreed
     ):
 
         # Support the legacy MCTS(game, evaluator) call shape.
@@ -93,14 +89,11 @@ class MCTS:
 
         self.c_puct = c_puct
 
-<<<<<<< HEAD
-=======
         # Root exploration noise (self-play only); None disables it.
         self.dirichlet_alpha = dirichlet_alpha
 
         self.dirichlet_eps = dirichlet_eps
 
->>>>>>> origin/shafreed
         if (
             'legacy_evaluator' in locals()
             and legacy_evaluator is not None
@@ -304,15 +297,12 @@ class MCTS:
 
         current = node
 
-<<<<<<< HEAD
-=======
         # *value* is from the perspective of the player to move at *node*.
         # Each node stores value from the perspective of the player who made
         # the move into it (its parent's mover), so select_child, which
         # maximises child.value(), picks moves good for the player choosing.
         value = -value
 
->>>>>>> origin/shafreed
         while current is not None:
 
             current.visit_count += 1
@@ -364,8 +354,6 @@ class MCTS:
 
             return state.get_pass_action()
 
-<<<<<<< HEAD
-=======
         if self.dirichlet_alpha:
 
             children = list(self.root.children.values())
@@ -381,7 +369,6 @@ class MCTS:
                     + self.dirichlet_eps * float(n)
                 )
 
->>>>>>> origin/shafreed
         # Run simulations.
 
         for _ in range(
