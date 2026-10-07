@@ -64,15 +64,6 @@ function mockGame() {
   const board = Array.from({ length: state.boardSize }, () =>
     Array(state.boardSize).fill(0),
   );
-<<<<<<< HEAD
-  const legal_moves = [];
-  for (let r = 0; r < state.boardSize; r++) {
-    for (let c = 0; c < state.boardSize; c++) {
-      if (board[r][c] === 0) legal_moves.push([r, c]);
-    }
-  }
-=======
->>>>>>> origin/shafreed
   return {
     active: true,
     board_size: state.boardSize,
@@ -86,11 +77,7 @@ function mockGame() {
     white_score: 0,
     black_stones: 0,
     white_stones: 0,
-<<<<<<< HEAD
-    legal_moves,
-=======
     legal_moves: [],
->>>>>>> origin/shafreed
     move_history: [],
     last_ai_move: null,
     ai_win_prob_black: 0.5,
@@ -119,54 +106,6 @@ async function mockRequest(endpoint, method, data) {
   if (endpoint === "/api/verify_admin")
     return { valid: data?.token === "alphago2026", message: "Mock admin check" };
   if (endpoint === "/api/new_game") {
-<<<<<<< HEAD
-    state.mockGameObj = mockGame();
-    if (data?.human_color === -1) {
-      state.mockGameObj.board[3][3] = 1;
-      state.mockGameObj.move_history.push({
-        player: "AI",
-        color: 1,
-        action: "D4",
-        coords: [3, 3],
-        time: 0.1,
-        win_prob_black: 0.52
-      });
-      state.mockGameObj.current_player = -1;
-      state.mockGameObj.last_ai_move = [3, 3];
-    }
-    return state.mockGameObj;
-  }
-  if (endpoint === "/api/state") return state.mockGameObj || mockGame();
-  if (endpoint === "/api/move") {
-    if (!state.mockGameObj) state.mockGameObj = mockGame();
-    const g = state.mockGameObj;
-    if (data?.is_pass) {
-      g.move_history.push({ player: "Human", color: state.humanColor, action: "PASS", coords: null });
-    } else if (data?.row != null && data?.col != null) {
-      g.board[data.row][data.col] = state.humanColor;
-      const moveName = `${String.fromCharCode(65 + data.col)}${data.row + 1}`;
-      g.move_history.push({ player: "Human", color: state.humanColor, action: moveName, coords: [data.row, data.col] });
-      g.current_player = -state.humanColor;
-      const aiR = (data.row + 2) % state.boardSize;
-      const aiC = (data.col + 2) % state.boardSize;
-      if (g.board[aiR][aiC] === 0) {
-        g.board[aiR][aiC] = -state.humanColor;
-        const aiMoveName = `${String.fromCharCode(65 + aiC)}${aiR + 1}`;
-        g.last_ai_move = [aiR, aiC];
-        g.move_history.push({ player: "AI", color: -state.humanColor, action: aiMoveName, coords: [aiR, aiC], time: 0.15, win_prob_black: 0.5 });
-        g.current_player = state.humanColor;
-      }
-    }
-    const legals = [];
-    for (let r = 0; r < state.boardSize; r++) {
-      for (let c = 0; c < state.boardSize; c++) {
-        if (g.board[r][c] === 0) legals.push([r, c]);
-      }
-    }
-    g.legal_moves = legals;
-    return g;
-  }
-=======
     Object.assign(state, {
       boardSize: data.board_size,
       humanColor: data.human_color,
@@ -185,7 +124,6 @@ async function mockRequest(endpoint, method, data) {
     endpoint === "/api/undo"
   )
     return mockGame();
->>>>>>> origin/shafreed
   if (endpoint === "/api/hint")
     return {
       coords: [
@@ -545,10 +483,7 @@ function updateGame(data) {
   state.legalMoves = data.legal_moves || [];
   state.currentPlayer = data.current_player || 1;
   state.lastAiMove = data.last_ai_move;
-<<<<<<< HEAD
-=======
   state.heat = null;
->>>>>>> origin/shafreed
   state.moveHistory = data.move_history || [];
   state.gameOver = Boolean(data.game_over);
   state.moveNumber = state.moveHistory.length;
@@ -638,10 +573,6 @@ function buildBoard() {
   grid.setAttribute("stroke", "#4f2d16");
   grid.setAttribute("stroke-width", "1.5");
   grid.setAttribute("opacity", ".88");
-<<<<<<< HEAD
-  grid.setAttribute("pointer-events", "none");
-=======
->>>>>>> origin/shafreed
 
   for (let index = 0; index < size; index += 1) {
     const position = margin + index * step;
@@ -663,10 +594,6 @@ function buildBoard() {
 
   const points = document.createElementNS(ns, "g");
   points.setAttribute("fill", "#3d210e");
-<<<<<<< HEAD
-  points.setAttribute("pointer-events", "none");
-=======
->>>>>>> origin/shafreed
   starPoints(size).forEach(([row, col]) => {
     const point = document.createElementNS(ns, "circle");
     point.setAttribute("cx", margin + col * step);
@@ -680,10 +607,6 @@ function buildBoard() {
   labels.setAttribute("fill", "#5b351a");
   labels.setAttribute("font-size", "12");
   labels.setAttribute("font-family", "JetBrains Mono, monospace");
-<<<<<<< HEAD
-  labels.setAttribute("pointer-events", "none");
-=======
->>>>>>> origin/shafreed
 
   for (let index = 0; index < size; index += 1) {
     const x = margin + index * step;
@@ -721,23 +644,12 @@ function buildBoard() {
       group.classList.add("intersection");
       group.addEventListener("click", () => playMove(row, col));
 
-<<<<<<< HEAD
-      const hitTarget = document.createElementNS(ns, "circle");
-      hitTarget.setAttribute("r", step * 0.48);
-      hitTarget.setAttribute("fill", "transparent");
-      hitTarget.setAttribute("pointer-events", "all");
-      group.append(hitTarget);
-
-=======
->>>>>>> origin/shafreed
       const ghost = document.createElementNS(ns, "circle");
       ghost.setAttribute("r", step * 0.39);
       ghost.setAttribute("fill", "none");
       ghost.classList.add("ghost");
       group.append(ghost);
 
-<<<<<<< HEAD
-=======
       const heat = document.createElementNS(ns, "circle");
       heat.setAttribute("r", step * 0.42);
       heat.setAttribute("fill", "#ff5a4f");
@@ -745,7 +657,6 @@ function buildBoard() {
       heat.style.pointerEvents = "none";
       group.append(heat);
 
->>>>>>> origin/shafreed
       const stone = document.createElementNS(ns, "circle");
       stone.setAttribute("r", step * 0.39);
       stone.setAttribute("filter", "url(#stone-shadow)");
@@ -756,11 +667,7 @@ function buildBoard() {
       last.classList.add("last-marker");
       group.append(last);
 
-<<<<<<< HEAD
-      boardCells.set(`${row},${col}`, { group, stone, last });
-=======
       boardCells.set(`${row},${col}`, { group, stone, last, heat });
->>>>>>> origin/shafreed
       svg.append(group);
     }
   }
@@ -772,14 +679,10 @@ function renderBoard() {
 
   const legal = new Set(state.legalMoves.map(([row, col]) => `${row},${col}`));
 
-<<<<<<< HEAD
-  boardCells.forEach(({ group, stone, last }, key) => {
-=======
   const heatMap = new Map((state.heat || []).map((m) => [`${m.coords[0]},${m.coords[1]}`, m.prob]));
   const heatMax = Math.max(0, ...heatMap.values());
 
   boardCells.forEach(({ group, stone, last, heat }, key) => {
->>>>>>> origin/shafreed
     const [row, col] = key.split(",").map(Number);
     const value = state.board[row]?.[col] || 0;
     group.classList.toggle("legal", legal.has(key));
@@ -789,12 +692,9 @@ function renderBoard() {
       value === 1 ? "url(#stone-black)" : "url(#stone-white)",
     );
     stone.style.display = value ? "block" : "none";
-<<<<<<< HEAD
-=======
     const prob = heatMap.get(key);
     heat.style.display = prob && !value ? "block" : "none";
     if (prob) heat.setAttribute("opacity", (0.15 + 0.6 * (prob / heatMax)).toFixed(2));
->>>>>>> origin/shafreed
     last.style.display =
       state.lastAiMove?.[0] === row && state.lastAiMove?.[1] === col
         ? "block"
@@ -880,21 +780,12 @@ function setThinking(active) {
 }
 
 async function playMove(row, col) {
-<<<<<<< HEAD
-  const cellValue = state.board[row]?.[col] || 0;
-  if (
-    state.thinking ||
-    state.gameOver ||
-    state.currentPlayer !== state.humanColor ||
-    cellValue !== 0
-=======
   if (
     state.thinking ||
     state.gameOver ||
     !state.legalMoves.some(
       ([legalRow, legalCol]) => legalRow === row && legalCol === col,
     )
->>>>>>> origin/shafreed
   )
     return;
   await performAction(
@@ -934,8 +825,6 @@ async function aiMove() {
     await performAction("/api/ai_move", "POST", null, "AI move failed");
 }
 
-<<<<<<< HEAD
-=======
 function exportSgf() {
   const link = document.createElement("a");
   link.href = `${API_BASE}/api/export_sgf`;
@@ -945,16 +834,12 @@ function exportSgf() {
   link.remove();
 }
 
->>>>>>> origin/shafreed
 async function hint() {
   if (state.thinking || state.gameOver) return;
   try {
     const data = await apiRequest("/api/hint", "POST");
     state.lastAiMove = data.coords;
-<<<<<<< HEAD
-=======
     state.heat = data.top_moves || null;
->>>>>>> origin/shafreed
     const timeMs = data.time_ms || 150;
     const speed = data.sims_per_sec || 300;
     $("#hint-copy").textContent = `${data.explanation || "Promising continuation found."} (${timeMs}ms / ${speed} sims/s)`;
@@ -1284,10 +1169,7 @@ function bind() {
   $("[data-action=pass]")?.addEventListener("click", passMove);
   $("[data-action=undo]")?.addEventListener("click", undoMove);
   $("[data-action=hint]")?.addEventListener("click", hint);
-<<<<<<< HEAD
-=======
   $("[data-action=sgf]")?.addEventListener("click", exportSgf);
->>>>>>> origin/shafreed
   $("[data-action=ai]")?.addEventListener("click", aiMove);
 
   $("#cancel-thinking")?.addEventListener("click", () =>
