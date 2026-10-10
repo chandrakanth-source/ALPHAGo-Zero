@@ -193,5 +193,18 @@
     "draws": 0,
     "win_rate_a": 72.5,
     "win_rate_b": 27.5
+  },
+  {
+    "timestamp": 1791594882,
+    "model_a": "model_iteration_10.pt",
+    "model_b": "latest_model.pt",
+    "sims_a": 100,
+    "sims_b": 100,
+    "num_games": 40,
+    "model_a_wins": 20,
+    "model_b_wins": 20,
+    "draws": 0,
+    "win_rate_a": 50.0,
+    "win_rate_b": 50.0
   }
 ]
