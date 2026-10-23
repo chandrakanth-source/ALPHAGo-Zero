@@ -8,13 +8,10 @@
 
 ## 1. Summary
 
-Ten candidate iterations were trained through the curriculum. Four were promoted to become the best model. The final best model is **iteration 9** (72.5% vs iteration 7).
+Eight candidate iterations (3–10) were trained through the curriculum. Three were promoted to become the best model. The final best model is **iteration 9** (72.5% vs iteration 7).
 
 | Iteration | Stage | Games | Sims/move | Eval games | Result (cand–best–draw) | Win rate | Outcome |
 |---|---|---|---|---|---|---|---|
-| 0 | baseline | — | — | — | — | — | Starting model |
-| 1 | pre-curriculum | 20 | 50 | 20 | 16–4 vs iter 0 | 80% | Evaluated (see §4) |
-| 2 | pre-curriculum | 20 | 50 | 20 | 13–7 vs iter 1 | 65% | Evaluated (see §4) |
 | 3 | 2 – Intermediate | 400 | 35 | 20 | 6–14–0 | 30% | ❌ Rejected |
 | 4 | 2 – Intermediate | 400 | 35 | 20 | 14–6–0 | 70% | ✅ **Promoted** |
 | 5 | 3 – Difficult | 600 | 50 | 20 | 9–10–1 | 45% | ❌ Rejected |
@@ -26,7 +23,7 @@ Ten candidate iterations were trained through the curriculum. Four were promoted
 
 **Current best model:** `models/model_iteration_9.pt` (= `models/latest_model.pt`).
 
-**Promotion rule:** a candidate replaces the current best if it wins **≥ 55%** of the evaluation games. Evaluation used 20 games for iterations 3–7 and 40 games from iteration 8 onward.
+**Promotion rule:** a candidate replaces the current best if it wins **≥ 55%** of the evaluation games. This is looser than the paper, which requires **more than 55%** of **400** games; under the paper's rule, iteration 7 (exactly 55%) would not have been promoted. Evaluation used 20 games for iterations 3–7 and 40 games from iteration 8 onward.
 
 ---
 
@@ -88,7 +85,7 @@ Each candidate plays the current best model. Colours alternate, the first 8 move
 | 9 | iteration 7 | — | — | **29 / 40** |
 | 10 | iteration 9 | — | — | 20 / 40 |
 
-Iterations 1 and 2 were evaluated in an earlier pipeline (`data/evaluation_history.json`, 20 games at 50 sims each). The per-colour split is not recorded for iterations 8–10.
+Iterations 0–2 come from an earlier pipeline that predates the bug fixes in §5. Their entries in `data/evaluation_history.json` carry placeholder timestamps (as do entries for iterations 20, 50 and 100, which were never trained), so they are not reported as results. The per-colour split is not recorded for iterations 8–10.
 
 ### Statistical reliability
 With 20 games, a candidate of equal strength passes the 55% bar about 41% of the time. With 40 games that falls to about 32%. Iterations 5, 6 and 8 (45–52.5%) are therefore close to equal strength with their opponent. Iteration 10 (50%) was rejected, and it is also close to equal strength with iteration 9.
@@ -111,7 +108,8 @@ All trained models are stored in `models/`. Files larger than 100 MB are not com
 
 | File | Description |
 |---|---|
-| `model_iteration_0.pt` … `model_iteration_2.pt` | Pre-curriculum models |
+| `pre_curriculum_best.pt` | Best model before the curriculum; opponent for iterations 3–4 |
+| `model_iteration_0.pt` … `model_iteration_2.pt` | Earlier-pipeline models (before the bug fixes); not part of the results |
 | `model_iteration_3.pt` | Stage 2 candidate (rejected, 30%) |
 | `model_iteration_4.pt` | Stage 2 candidate (**promoted**, 70%) |
 | `model_iteration_5.pt` | Stage 3 candidate (rejected, 45%) |
