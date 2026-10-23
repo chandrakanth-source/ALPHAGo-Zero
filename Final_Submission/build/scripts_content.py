@@ -127,7 +127,7 @@ SCRIPTS = {
         "Algorithm six decides whether a new network is really better. The candidate plays an arena match "
         "against the current best. Colours alternate, the first 8 moves are sampled so that the games differ, "
         "and games are capped at 500 moves. From iteration 8 onward we play 40 games, and the candidate must "
-        "win at least 55 percent to be promoted.",
+        "win at least 55 percent to be promoted. The paper is stricter: more than 55 percent over 400 games.",
         "One important point: with 40 games, a measured win rate has a standard error of about 8 percentage "
         "points. So a 50 percent result does not mean the candidate is worse, only that it was not clearly "
         "better.",
@@ -143,8 +143,8 @@ SCRIPTS = {
         "Here are our results. Each bar is one candidate's win rate against the current best model. Three "
         "candidates were promoted: iteration 4 with 70 percent, iteration 7 with 55 percent, and iteration 9 "
         "with 72.5 percent, winning 29 games to 11 against iteration 7.",
-        "Iteration 9 is our final best model, and that result is statistically clear: about 2.8 standard "
-        "errors above an even match. The other five candidates were rejected, but most of them scored between "
+        "Iteration 9 is our final best model, and that result is unlikely to be luck: if the two models were "
+        "equally strong, winning 29 or more of 40 games would happen less than 1 percent of the time. The other five candidates were rejected, but most of them scored between "
         "45 and 52.5 percent, which is essentially a tie with the model they played, not a regression. This "
         "shows that the self-play loop really does produce stronger networks without any human data.",
     ]),
@@ -193,7 +193,7 @@ SCRIPTS = {
         "results are in Final_Training_Report.md.",
         "To run it, you pull the models, install the requirements and run train_batched.py with a stage "
         "number. Because self-play is saved in batches, a stopped run can be restarted with the same command. "
-        "The project also has a test suite of 99 passing unit tests.",
+        "The project also has 101 unit tests, and all of them pass.",
     ]),
     19: ("harshithan", 0.5, [
         "These are the main references we used. The core paper is Silver and colleagues, 2017, in Nature. We "
@@ -202,7 +202,7 @@ SCRIPTS = {
         "Coulom.",
     ]),
     20: ("harshithan", 0.75, [
-        "To conclude: we implemented the complete AlphaGo Zero loop, with Go rules, a dual-head residual "
+        "To conclude: we implemented a scaled-down version of the AlphaGo Zero loop, with Go rules, a dual-head residual "
         "network, PUCT tree search, self-play, training and arena evaluation, and trained it from scratch on a "
         "single laptop. Over ten iterations three models were promoted, and iteration 9 is our best, winning "
         "72.5 percent against its predecessor.",

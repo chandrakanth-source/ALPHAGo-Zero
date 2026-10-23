@@ -21,6 +21,11 @@ from scripts_content import MEMBER_ORDER, MEMBERS, SCRIPTS, SLIDE_TITLES
 
 VALIDATE = "/home/shafreed/.claude/skills/synced/f7d7525f-fac9-4ce7-b48f-0dbec9262a24_7916b980-97b8-4f86-91a9-c6e63cf9e18d/pptx/scripts/office/validate.py"
 WPM = 130
+
+# Visible slide text corrected after the report review (slide number -> [(old, new)]); applied once
+SLIDE_TEXT_FIXES = {
+    20: [("We implemented the full AlphaGo Zero loop:", "We implemented a scaled-down version of the AlphaGo Zero loop:")],
+}
 EMU = 914400
 
 
@@ -36,6 +41,8 @@ def title_slide(x):
     """Replace the placeholder 'Submitted by' line with the five members on two lines."""
     names = [f"{MEMBERS[k][0]} ({MEMBERS[k][1]})" for k in MEMBER_ORDER]
     m = re.search(r"<a:p>(?:(?!</a:p>).)*Submitted by:(?:(?!</a:p>).)*</a:p>", x)
+    if not m and escape(names[0]) in x:
+        return x  # already filled in by an earlier run
     assert m, "title slide placeholder not found"
     old_p = m.group(0)
     rpr = re.search(r"<a:rPr[^>]*>.*?</a:rPr>", old_p).group(0)
@@ -74,6 +81,14 @@ def update_deck(deck):
 
     s1 = work / "ppt" / "slides" / "slide1.xml"
     s1.write_text(title_slide(s1.read_text(encoding="utf8")), encoding="utf8")
+    for n, fixes in SLIDE_TEXT_FIXES.items():
+        sp = work / "ppt" / "slides" / f"slide{n}.xml"
+        sx = sp.read_text(encoding="utf8")
+        for old, new in fixes:
+            if escape(new) not in sx:
+                assert escape(old) in sx, f"slide {n}: text not found: {old}"
+                sx = sx.replace(escape(old), escape(new))
+        sp.write_text(sx, encoding="utf8")
 
     empty_body = re.compile(r'(<p:ph type="body" idx="1"/>.*?<a:lstStyle/>)(.*?)(</p:txBody>)', re.S)
     for n in SCRIPTS:

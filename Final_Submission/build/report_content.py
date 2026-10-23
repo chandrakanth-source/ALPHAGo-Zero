@@ -21,8 +21,11 @@ CONTENT = [
           "single neural network, starting from random weights, is trained only on games the program plays "
           "against itself, using MCTS as a policy-improvement operator. After three days of training it beat "
           "the version of AlphaGo that defeated Lee Sedol by 100 games to 0 [1]."),
-    ("p", "In this project we studied the paper and implemented the complete AlphaGo Zero training loop in "
-          "Python and PyTorch [10] on a 12×12 board, scaled down to run on a single laptop. Our contributions are:"),
+    ("p", "In this project we studied the paper and implemented a **scaled-down version of AlphaGo Zero** in "
+          "Python and PyTorch [10]. It keeps the algorithm's structure (self-play with MCTS, a dual-head network "
+          "and gated evaluation) but uses a 12×12 board, a much smaller network and search budget, and far fewer "
+          "games, so that it runs on a single laptop. It is therefore not a reproduction of the paper's results. "
+          "Our contributions are:"),
     ("bullets", [
         "A Go environment with captures, superko, passing and area scoring.",
         "A dual-head residual network that outputs a move distribution and a position value.",
@@ -119,7 +122,7 @@ CONTENT = [
       ["Networks", "Policy + value (separate)", "One dual-head ResNet", "One dual-head ResNet", "One dual-head ResNet"],
       ["Leaf evaluation", "Value net + rollouts", "Value head only", "Value head only", "Value head only"],
       ["Input features", "48 hand-crafted planes", "17 stone-history planes", "Game-specific planes", "3 planes"],
-      ["Model selection", "—", "Gated, 55% of 400 games", "Continuous update", "Gated, 55% of 20–40 games"],
+      ["Model selection", "—", "Gated: > 55% of 400 games", "Continuous update", "Gated: ≥ 55% of 20–40 games"],
       ["Board", "19×19 Go", "19×19 Go", "Chess, shogi, Go", "12×12 Go"]],
      [1.6, 1.9, 1.9, 1.9, 1.9]),
 
@@ -211,16 +214,35 @@ CONTENT = [
     ("h2", "5.8 Training"),
     ("p", "The network is trained to predict the search policy and the game result with the AlphaGo Zero loss:"),
     ("eq", "L(θ) = −Σ_a π(a) log p(a)  +  (z − v)²  +  c‖θ‖²"),
-    ("p", "The L2 term is applied as weight decay, c = 10⁻⁴. We use SGD with momentum 0.9, a learning rate of "
+    ("p", "Both data terms are averaged over each mini-batch. We use SGD with momentum 0.9, a learning rate of "
           "0.001 and mini-batches of 32 positions, for 4 to 8 epochs per iteration depending on the stage. Each "
           "candidate starts from the weights of the current best model, and a checkpoint is saved after every "
-          "epoch. Because `GoNetwork` already outputs probabilities, the trainer passes their logarithm to the "
-          "loss. Applying a second softmax would distort the policy gradient (Section 5.12)."),
+          "epoch. The implementation is `Trainer.calculate_loss` and `Trainer.train_epoch` in "
+          "`training/trainer.py`."),
+    ("p", "**L2 term.** The regulariser is not written into the loss; it is applied through the optimiser's "
+          "weight decay λ = 10⁻⁴. With SGD, weight decay adds λθ to the gradient, which is the gradient of "
+          "(λ/2)‖θ‖². Our setting therefore corresponds to c = λ/2 = 5×10⁻⁵ in the formula above, half of the "
+          "paper's c = 10⁻⁴."),
+    ("p", "**Policy term.** `GoNetwork` ends with a softmax, so its policy output p is already a probability "
+          "distribution. The loss function computes −mean over the batch of Σ_a π(a)·log_softmax(x)_a for its "
+          "policy input x, and the trainer passes x = log p, with p clamped at 10⁻⁸ to avoid log 0. Because the "
+          "probabilities sum to one, log_softmax(log p) = log p − log Σ_b p_b = log p, so the computed policy loss "
+          "is the cross-entropy −Σ_a π(a) log p(a) of the formula, except for moves whose probability is below "
+          "the clamp. Passing p itself, as our first version did, would apply a second softmax and compute a "
+          "different, flatter distribution (Section 5.12)."),
+    ("p", "**Value term.** The value loss is the mean squared error between the network's v and the game result "
+          "z over the mini-batch (`F.mse_loss`)."),
     ("h2", "5.9 Evaluation and promotion"),
     ("p", "A candidate plays the current best model in an arena match. Colours alternate between games. The "
           "first 8 moves of each game are sampled from the visit counts so that games differ, and games are "
           "capped at 500 moves and scored by area. Iterations 3–7 used 20 games; from iteration 8 we raised "
-          "this to 40 games. The candidate is promoted if it wins at least 55%."),
+          "this to 40 games. The win rate is wins divided by games played, so draws count against the "
+          "candidate, and the candidate is promoted if its win rate is **at least 55%**."),
+    ("p", "This criterion is looser than the paper's in two ways. The paper promotes a candidate only if it "
+          "wins **more than 55%** of **400** games [1]; we use at least 55% of 20 or 40 games. The difference "
+          "mattered once: iteration 7 was promoted with exactly 55% (11 of 20 games), which the paper's strict "
+          "threshold would have rejected. With 20 games, an equally strong model reaches 11 wins about 41% of the "
+          "time, so this promotion on its own was weak evidence. That is why we moved to 40 games from iteration 8."),
     ("h2", "5.10 Training curriculum"),
     ("p", "To use limited compute well, training runs through stages of increasing difficulty (Table 3). Early "
           "stages play many short, cheap games with shallow search; later stages search deeper, which gives "
@@ -236,7 +258,10 @@ CONTENT = [
      [0.9, 1.6, 1.8, 1.9, 1.0, 1.3]),
     ("h2", "5.11 Differences from the paper"),
     ("p", "Table 4 lists the main differences. Most are reductions in scale forced by running on one laptop "
-          "instead of a large cluster; the algorithm itself is unchanged."),
+          "instead of a large cluster. A few are simplifications: fewer input features, simpler rules, sequential "
+          "rather than asynchronous iterations, and a looser promotion threshold. The structure of the algorithm "
+          "is the same, so our system is best described as a scaled-down AlphaGo Zero, and its results should "
+          "not be compared directly with the paper's."),
     ("table", "Paper settings compared with our implementation",
      ["Aspect", "AlphaGo Zero [1]", "This project"],
      [["Board", "19×19", "12×12"],
@@ -246,7 +271,7 @@ CONTENT = [
       ["Self-play games", "4.9 million (3-day run)", "5,700 (iterations 3–10)"],
       ["Training data", "Last 500,000 games", "Last 2 iterations"],
       ["Mini-batch", "2,048", "32"],
-      ["Evaluation", "400 games, 55%", "20–40 games, 55%"],
+      ["Evaluation", "400 games; promote if > 55%", "20–40 games; promote if ≥ 55%"],
       ["Pipeline", "Asynchronous", "Sequential iterations"],
       ["Rules", "Chinese rules, komi 7.5, resignation", "Area scoring, no komi, no resignation"]],
      [2.2, 3.2, 3.1]),
@@ -276,9 +301,11 @@ CONTENT = [
     ("h2", "6.1 Experimental setup"),
     ("p", "Training ran from 6 to 10 October 2026 on a laptop with a 20-thread CPU (18 self-play workers), "
           "15 GB of RAM and an NVIDIA GeForce RTX 4050 Laptop GPU (6 GB), using Python 3.14, PyTorch 2.11 and "
-          "CUDA 12.8. Iterations 3–9 ran on Windows; iteration 10 ran mostly on Linux. The code base has 99 "
-          "passing unit tests covering the environment, network shapes, MCTS, self-play, training and "
-          "evaluation; two further web-server tests require the `httpx` package."),
+          "CUDA 12.8. Iterations 3–9 ran on Windows; iteration 10 ran mostly on Linux. The code base has **101 "
+          "unit tests**, covering the environment, network shapes, MCTS, self-play, training, evaluation and the "
+          "web server, and all 101 pass. Two of them (`tests/test_web_sgf_heatmap.py`) need the `httpx` package, "
+          "which is not listed in `requirements.txt`; without it pytest stops while collecting that file, and the "
+          "other 99 tests pass when it is skipped."),
     ("h2", "6.2 Evaluation results"),
     ("p", "Table 5 and Figure 2 show the result of every candidate. Three candidates were promoted: "
           "iterations 4, 7 and 9. The final best model is **iteration 9**, which beat iteration 7 by 29 games "
@@ -333,9 +360,14 @@ CONTENT = [
           "because MCTS evaluates one position at a time and runs on the CPU."),
     ("h2", "6.5 Discussion"),
     ("p", "**The system learns.** Three promotions show that the self-play loop produced stronger networks "
-          "with no human data, as the paper claims. Iteration 9's result is statistically clear: if both "
-          "models were equally strong, the standard error of a 40-game win rate would be √(0.25/40) ≈ 7.9 "
-          "percentage points, so 72.5% is about 2.8 standard errors above 50%."),
+          "without human data, consistent with the paper's central claim. Iteration 9's result is the strongest "
+          "evidence: if iterations 9 and 7 were equally strong, winning 29 or more of 40 games would happen with "
+          "probability about 0.003 (one-sided binomial test; about 0.006 two-sided)."),
+    ("p", "This figure should be read with care. The test assumes that games are independent, which holds only "
+          "approximately: every game is between the same two models and games differ mainly through the 8 "
+          "sampled opening moves. It also compares iteration 9 only with iteration 7. We therefore treat it as "
+          "strong evidence that iteration 9 is stronger than iteration 7 under our evaluation conditions, not as "
+          "an exact significance level or a measure of absolute strength."),
     ("p", "**Most rejections are ties, not regressions.** Iterations 5, 6, 8 and 10 scored between 45% and "
           "52.5%, within one standard error of an even match. A 40-game test cannot separate small "
           "improvements from noise. Even a candidate that is truly 5 points stronger would often fail the "
@@ -351,8 +383,8 @@ CONTENT = [
 
     # ------------------------------------------------------------------ 7
     ("h1", "7. Conclusion"),
-    ("p", "We reviewed *Mastering the game of Go without human knowledge* [1] and implemented its complete "
-          "method: a Go environment, a dual-head residual network, PUCT-based MCTS with Dirichlet noise and "
+    ("p", "We reviewed *Mastering the game of Go without human knowledge* [1] and implemented a scaled-down "
+          "version of its method: a Go environment, a dual-head residual network, PUCT-based MCTS with Dirichlet noise and "
           "temperature, parallel self-play, training with the AlphaGo Zero loss, and gated evaluation. Trained "
           "from scratch on a laptop through a four-stage curriculum, the system produced three promoted "
           "models. The best, iteration 9, won 72.5% of its games against its predecessor, and the policy loss "
@@ -404,8 +436,6 @@ CONTENT = [
         "LNCS 4630, Springer, 2006, pp. 84–99.",
         "A. Paszke et al., “PyTorch: An imperative style, high-performance deep learning library,” in "
         "*Advances in Neural Information Processing Systems 32*, 2019, pp. 8024–8035.",
-        "D. Foster, “AlphaGo Zero explained in one diagram,” *Applied Data Science* (Medium), 2017. "
-        "[Online]. Available: https://medium.com/applied-data-science/alphago-zero-explained-in-one-diagram-365f5abf67e0",
     ]),
 
     # ------------------------------------------------------------------ 10
@@ -427,16 +457,32 @@ CONTENT = [
      [2.6, 5.9]),
     ("p", "**Environment.** Python 3.14, PyTorch 2.11 with CUDA 12.8, NumPy; FastAPI and Uvicorn for the web "
           "interface. A CUDA GPU is optional for training but makes it much faster."),
+    ("p", "For GPU training, first install the CUDA build of PyTorch for your system from pytorch.org; "
+          "`requirements.txt` alone may install a CPU-only build. Git LFS must be installed to download the "
+          "models. `pytest` and `httpx` are needed only for the tests."),
+    ("plead", "**Linux or macOS:**"),
     ("code", [
         "git clone https://github.com/chandrakanth-source/ALPHAGo-Zero.git",
         "cd ALPHAGo-Zero && git checkout shafreed",
-        "git lfs pull                      # download the trained models",
-        "python -m venv .venv && source .venv/bin/activate",
+        "git lfs install && git lfs pull   # download the trained models",
+        "python3 -m venv .venv && source .venv/bin/activate",
         "pip install -r requirements.txt pytest httpx",
-        "pytest                            # run the test suite",
+        "pytest                            # 101 tests",
+    ]),
+    ("plead", "**Windows (PowerShell).** Iterations 3–9 were trained on Windows with these steps. If PowerShell "
+          "refuses to run `Activate.ps1`, first run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`."),
+    ("code", [
+        "git clone https://github.com/chandrakanth-source/ALPHAGo-Zero.git",
+        "cd ALPHAGo-Zero; git checkout shafreed",
+        "git lfs install; git lfs pull",
+        "py -m venv .venv",
+        ".venv\\Scripts\\Activate.ps1",
+        "pip install -r requirements.txt pytest httpx",
+        "pytest",
     ]),
     ("p", "**Reproducing training.** Each stage trains its two iterations in turn. Self-play is saved every 25 "
-          "games, so the same command resumes an interrupted run."),
+          "games, so the same command resumes an interrupted run. The commands are the same on every system "
+          "(on Windows, `python` runs the interpreter from the activated `.venv`)."),
     ("code", [
         "python train_batched.py --stage 2     # iterations 3-4",
         "python train_batched.py --stage 5     # iterations 9-10",

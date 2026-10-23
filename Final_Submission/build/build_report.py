@@ -83,6 +83,10 @@ class Doc:
     def p(self, text):
         return para(rich(text))
 
+    def plead(self, text):
+        """A paragraph that introduces the next block (e.g. code) and stays on its page."""
+        return para(rich(text), extra="<w:keepNext/><w:keepLines/>")
+
     def bullets(self, items, num_id=1):
         return "".join(
             f'<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="{num_id}"/></w:numPr>'
@@ -102,7 +106,8 @@ class Doc:
         out = []
         for k, ln in enumerate(lines):
             after = 160 if k == len(lines) - 1 else 0
-            out.append(f'<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F2F4F7"/>'
+            keep = "<w:keepNext/><w:keepLines/>" if k < len(lines) - 1 else "<w:keepLines/>"
+            out.append(f'<w:p><w:pPr>{keep}<w:shd w:val="clear" w:color="auto" w:fill="F2F4F7"/>'
                        f'<w:spacing w:after="{after}" w:line="264" w:lineRule="auto"/><w:ind w:left="284"/></w:pPr>'
                        f'{run(ln, sz=19, font=font)}</w:p>')
         return "".join(out)

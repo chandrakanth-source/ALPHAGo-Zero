@@ -44,7 +44,8 @@ EXPLANATIONS = {
              "version of itself every time."),
             ("Why the 55% threshold and not 50%?",
              "To avoid promoting a model that only looks better by luck. A candidate must be clearly stronger. "
-             "The paper uses the same 55% rule.")],
+             "The paper uses a similar but stricter rule: more than 55% over 400 games. We use at least 55% over 20–40 games, "
+             "and under the paper's rule our iteration 7 (exactly 55%) would not have been promoted.")],
     ),
     5: dict(
         simple=["We programmed the Go rules ourselves. The agent sees the board as three 12×12 grids of 0s and 1s: "
@@ -180,10 +181,11 @@ EXPLANATIONS = {
                 "about as strong as the champion, not weaker."],
         remember=["Promoted: iter 4 (70%), iter 7 (55%), iter 9 (72.5%, 29–11 vs iter 7).",
                   "Rejected: iter 3 (30%), 5 (45%), 6 (50%), 8 (52.5%), 10 (50%).",
-                  "Iteration 9's result is ≈2.8 standard errors above 50%."],
+                  "If iterations 9 and 7 were equal, 29+ wins of 40 would happen with probability ≈0.003 (binomial test)."],
         qa=[("How do you know the model actually got better and it is not just luck?",
              "Iteration 9 won 29 of 40 games. If the two models were equal, a result that far from 50% would "
-             "happen by chance well under 1% of the time (about 2.8 standard errors)."),
+             "happen with probability about 0.003 (a one-sided binomial test). That test assumes independent games, "
+             "which is only approximately true, so we call it strong evidence rather than an exact significance level."),
             ("Iteration 7 was promoted with exactly 55% on only 20 games. Is that reliable?",
              "Not very, and we say so. With 20 games the standard error is about 11 points, which is why we "
              "raised evaluations to 40 games from iteration 8. Iteration 9 then beat iteration 7 decisively, which "
@@ -249,7 +251,7 @@ EXPLANATIONS = {
                 "LFS because model files are large, and training can be stopped and resumed safely."],
         remember=["github.com/chandrakanth-source/ALPHAGo-Zero, branch shafreed.",
                   "Run: git lfs pull · pip install -r requirements.txt · python train_batched.py --stage N · pytest.",
-                  "99 unit tests pass."],
+                  "101 unit tests, all passing (2 web tests need the httpx package)."],
         qa=[("What is Git LFS?",
              "Large File Storage: Git keeps a small pointer in the repository and stores the large file on a "
              "separate server. It keeps the repository small and avoids GitHub's 100 MB file limit."),
@@ -267,7 +269,7 @@ EXPLANATIONS = {
              "and shogi as well, and replaced the evaluation gate with continuous updates.")],
     ),
     20: dict(
-        simple=["We built the complete AlphaGo Zero method and showed that it learns from nothing but self-play, "
+        simple=["We built a scaled-down version of the AlphaGo Zero method and showed that it learns from nothing but self-play, "
                 "even at small scale. The main limits are compute and how precisely small improvements can be "
                 "measured."],
         remember=["Best model: iteration 9, 72.5% vs iteration 7.",
