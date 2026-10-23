@@ -9,3 +9,11 @@ training/batched_state.json
 models/latest_model.before_stage*.pt
 training/*.log
 archive_buggy_mcts/
+training/watch_iter8_push.sh
+training/launch_detached.py
+training/watch_push.sh
+training/*.log
+
+# LibreOffice / Office lock files
+.~lock.*#
+~$*
