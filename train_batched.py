@@ -150,6 +150,8 @@ def main():
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--batch-size", type=int, default=25)
     ap.add_argument("--workers", type=int, default=default_workers())
+    ap.add_argument("--stop-after", type=int, default=None,
+                    help="stop once this iteration number is complete")
     ap.add_argument("--replay-window", type=int, default=2,
                     help="train on the last N iterations' self-play games")
     ap.add_argument("--smoke", action="store_true", help="tiny run in an isolated temp dir")
@@ -191,6 +193,9 @@ def main():
         log(f"##### STAGE {s} #####")
         for it in cfg["iterations"]:
             run_iteration(it, cfg, args, state, state_path, batch_dir)
+            if args.stop_after is not None and it >= args.stop_after:
+                log(f"stopping after iteration {it} (--stop-after)")
+                return
     log("ALL REQUESTED STAGES COMPLETE")
 
 

@@ -20,8 +20,8 @@ and model promotion – all wired together into one automatic loop.
 | **Checkpointing** | Epoch-level checkpoints with automatic resume (`CheckpointManager`) |
 | **Evaluation** | Alternating-colour match between candidate and current best model |
 | **Promotion** | Candidate promoted when win rate ≥ threshold (default 55 %) |
-| **Full pipeline** | Single `python main.py` or `python iteration/run_iteration.py` |
-| **Demo** | `python demo.py` — watch two AIs play a full game |
+| **Full pipeline** | Single `python main.py` or `python scripts/legacy/run_iteration.py` |
+| **Demo** | `python scripts/demo.py` — watch two AIs play a full game |
 | **Tests** | 85 + pytest tests covering every component |
 
 ---
@@ -32,7 +32,6 @@ and model promotion – all wired together into one automatic loop.
 alphago-zero/
 │
 ├── main.py                       ← Full training pipeline (original)
-├── demo.py                       ← Final demonstration: AI vs AI game
 │
 ├── config/
 │   └── training_config.py        ← Hyperparameter constants
@@ -70,8 +69,11 @@ alphago-zero/
 │   ├── promotion.py              ← PromotionManager
 │   └── model_promotion.py        ← ModelPromotion (win-rate decision)
 │
-├── iteration/
-│   └── run_iteration.py          ← Day 26: complete automatic pipeline
+├── scripts/
+│   ├── demo.py                   ← Final demonstration: AI vs AI game
+│   └── legacy/                   ← Earlier pipeline runners (run_iteration.py, train_stage*.py, …)
+│
+├── docs/                         ← Earlier reports and research notes
 │
 ├── iterations/
 │   └── iteration.py              ← AlphaGoZeroIteration (one outer loop)
@@ -204,7 +206,7 @@ pip install torch numpy pytest
 python main.py
 
 # Or use the Day 26 clean pipeline:
-python iteration/run_iteration.py
+python scripts/legacy/run_iteration.py
 ```
 
 ### 3. Resume interrupted training
@@ -213,30 +215,30 @@ Training automatically resumes from the last checkpoint:
 
 ```bash
 python main.py          # detects training/checkpoints/checkpoint_latest.pt
-python iteration/run_iteration.py   # same
+python scripts/legacy/run_iteration.py   # same
 ```
 
 Force a fresh start:
 
 ```bash
 python main.py --fresh
-python iteration/run_iteration.py --fresh
+python scripts/legacy/run_iteration.py --fresh
 ```
 
 ### 4. Watch a demo game
 
 ```bash
 # Two AIs play against each other using the latest trained model
-python demo.py
+python scripts/demo.py
 
 # Small board for a quick demo
-python demo.py --board-size 5 --sims 20
+python scripts/demo.py --board-size 5 --sims 20
 
 # Show only the final board
-python demo.py --quiet
+python scripts/demo.py --quiet
 ```
 
-### 5. Command-line options (main.py / run_iteration.py)
+### 5. Command-line options (main.py / scripts/legacy/run_iteration.py)
 
 ```
 --iterations INT          Number of training iterations (default: 5)
@@ -289,7 +291,7 @@ iteration, epoch = trainer.resume_from_latest()
 
 ## 🔄 Training Pipeline (Day 26)
 
-The complete automatic loop (`iteration/run_iteration.py`):
+The complete automatic loop (`scripts/legacy/run_iteration.py`):
 
 ```
 Iteration 1
