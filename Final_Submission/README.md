@@ -14,6 +14,7 @@ Shaik Humair Fatah (2024BCS0105) · Lakavath Harshithan (2024BCS0321)
 | `AlphaGoZero_Final_Report.docx` / `.pdf` | Final report on the faculty template (21 pages) |
 | `AlphaGoZero_Presentation.pptx` | Presentation (20 slides); each slide's script is in its speaker notes |
 | `AlphaGoZero_Presentation_Scripts.docx` | Speaking script for each team member, with slide allocation and timings |
+| `AlphaGoZero_Presentation_Explanations.docx` | Study guide: each slide in plain language, key numbers, likely questions with answers, glossary |
 | `build/` | Scripts that regenerate the report, figures and scripts (see below) |
 
 ## Trained models
