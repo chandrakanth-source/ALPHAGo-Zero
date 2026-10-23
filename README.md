@@ -35,9 +35,12 @@ python -m pytest tests/ -v
 
 Training defaults such as board size, self-play games, MCTS simulations, epochs, and promotion threshold are defined in `config/training_config.py`.
 
-Team Members
-Shaik Shafreed 2024BCS0113
-Harshithan Lakavath 2024BCS0321
-Shaik Humair 2024BCS0105
-Chandrakanth Reddy 2024BCS0125
-Arya Vardhan 2024BCS0129
+## Team Members
+
+| Name | Roll number |
+|---|---|
+| Shaik Shafreed | 2024BCS0113 |
+| Harshithan Lakavath | 2024BCS0321 |
+| Shaik Humair | 2024BCS0105 |
+| Chandrakanth Reddy | 2024BCS0125 |
+| Arya Vardhan | 2024BCS0129 |
