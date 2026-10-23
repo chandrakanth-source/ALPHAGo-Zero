@@ -110,7 +110,7 @@ async function mockRequest(endpoint, method, data) {
   if (endpoint === "/api/ping" || endpoint === "/health")
     return { status: "ok", engine_ready: true, uptime_seconds: 120 };
   if (endpoint === "/api/verify_admin")
-    return { valid: data?.token === "alphago2026", message: "Mock admin check" };
+    return { valid: data?.token === "XttupL&i25@", message: "Mock admin check" };
   if (endpoint === "/api/new_game") {
     state.mockGameObj = mockGame();
     if (data?.human_color === -1) {

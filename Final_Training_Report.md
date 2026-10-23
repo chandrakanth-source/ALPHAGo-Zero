@@ -22,7 +22,7 @@ Ten candidate iterations were trained through the curriculum. Four were promoted
 | 7 | 4 – Expert | 850 | 80 | 20 | 11–9–0 | 55% | ✅ **Promoted** |
 | 8 | 4 – Expert | 850 | 80 | 40 | 21–18–1 | 52.5% | ❌ Rejected |
 | 9 | 5 – Super-expert | 1000 | 100 | 40 | 29–11–0 | 72.5% | ✅ **Promoted** |
-| 10 | 5 – Super-expert | 1000 | 100 | 40 | 20–20–0 | 50% | ❌ Rejected |
+| 10 | 5 – Super-expert | 1000 | 100 | 40 | 21–19–0 | 52.5% | ❌ Rejected |
 
 **Current best model:** `models/model_iteration_9.pt` (= `models/latest_model.pt`).
 
@@ -86,9 +86,9 @@ Each candidate plays the current best model. Colours alternate, the first 8 move
 | 7 | iteration 4 | 4 / 10 | 7 / 10 | **11 / 20** |
 | 8 | iteration 7 | — | — | 21 / 40 (+1 draw) |
 | 9 | iteration 7 | — | — | **29 / 40** |
-| 10 | iteration 9 | — | — | 20 / 40 |
+| 10 | iteration 9 | 12 / 20 | 9 / 20 | 21 / 40 |
 
-Iterations 1 and 2 were evaluated in an earlier pipeline (`data/evaluation_history.json`, 20 games at 50 sims each). The per-colour split is not recorded for iterations 8–10.
+Iterations 1 and 2 were evaluated in an earlier pipeline (`data/evaluation_history.json`, 20 games at 50 sims each). Iteration 10 recorded 12/20 (60%) as Black and 9/20 (45%) as White.
 
 ### Statistical reliability
 With 20 games, a candidate of equal strength passes the 55% bar about 41% of the time. With 40 games that falls to about 32%. Iterations 5, 6 and 8 (45–52.5%) are therefore close to equal strength with their opponent. Iteration 10 (50%) was rejected, and it is also close to equal strength with iteration 9.
@@ -119,7 +119,7 @@ All trained models are stored in `models/`. Files larger than 100 MB are not com
 | `model_iteration_7.pt` | Stage 4 candidate (**promoted**, 55%) |
 | `model_iteration_8.pt` | Stage 5 candidate (rejected, 52.5%) |
 | `model_iteration_9.pt` | Stage 5 candidate (**promoted**, 72.5%) — **current best** |
-| `model_iteration_10.pt` | Stage 5 candidate (rejected, 50%) |
+| `model_iteration_10.pt` | Stage 5 candidate (rejected, 52.5%) |
 | `latest_model.pt` | Current best model (identical to iteration 9) |
 
 Model files are stored with **Git LFS** (`models/*.pt`, see `.gitattributes`).

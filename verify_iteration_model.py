@@ -1,12 +1,13 @@
+import sys
 import torch
 
 from network.model_loader import load_model
 
 
-model_path = "models/model_iteration_1.pt"
+model_path = sys.argv[1] if len(sys.argv) > 1 else "models/model_iteration_10.pt"
 
 print("=" * 60)
-print("VERIFYING ITERATION 1 MODEL")
+print(f"VERIFYING MODEL: {model_path}")
 print("=" * 60)
 
 model = load_model(

@@ -1,9 +1,9 @@
 {
   "history": [
-    "checkpoint_iter0002_epoch0000.pt",
-    "checkpoint_iter0002_epoch0001.pt",
-    "checkpoint_iter0002_epoch0002.pt",
-    "checkpoint_iter0002_epoch0003.pt",
-    "checkpoint_iter0010_epoch0000.pt"
+    "checkpoint_iter0010_epoch0003.pt",
+    "checkpoint_iter0010_epoch0004.pt",
+    "checkpoint_iter0010_epoch0005.pt",
+    "checkpoint_iter0010_epoch0006.pt",
+    "checkpoint_iter0010_epoch0007.pt"
   ]
 }

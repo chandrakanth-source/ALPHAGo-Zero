@@ -215,15 +215,17 @@ def main():
     log("=" * 70)
 
     # 4. Consolidate Full Dataset for Final Training
-    all_examples = []
-    for b in range(total_batches):
-        b_path = os.path.join(BATCH_DIR, f"iter{ITERATION}_batch_{b:03d}.pt")
-        if os.path.exists(b_path):
-            all_examples.extend(torch.load(b_path, weights_only=False))
-
     final_data_path = os.path.join(PROJECT_ROOT, "data", f"self_play_iteration_{ITERATION}.pt")
-    torch.save(all_examples, final_data_path)
-    log(f"Merged {len(all_examples)} positions into {final_data_path}")
+    if os.path.exists(final_data_path) and os.path.getsize(final_data_path) > 1000000:
+        log(f"Consolidated dataset already exists: {final_data_path}")
+    else:
+        all_examples = []
+        for b in range(total_batches):
+            b_path = os.path.join(BATCH_DIR, f"iter{ITERATION}_batch_{b:03d}.pt")
+            if os.path.exists(b_path):
+                all_examples.extend(torch.load(b_path, weights_only=False))
+        torch.save(all_examples, final_data_path)
+        log(f"Merged {len(all_examples)} positions into {final_data_path}")
 
     # 5. Final Training Epochs
     log(f"Running final consolidation training ({args.final_epochs} epochs)...")

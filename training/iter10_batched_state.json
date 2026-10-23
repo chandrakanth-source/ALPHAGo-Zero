@@ -34,10 +34,23 @@
     30,
     31,
     32,
-    33
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39
   ],
-  "total_games_played": 850,
-  "status": "in_progress",
+  "total_games_played": 1000,
+  "status": "completed",
   "latest_checkpoint": "D:\\projects\\ai\\alphago zero\\training\\checkpoints\\iter10_online_checkpoint.pt",
-  "latest_loss": 3.218734450448336
+  "latest_loss": 3.2071047916628483,
+  "promoted": false,
+  "eval_result": {
+    "wins": 21,
+    "losses": 19,
+    "draws": 0,
+    "win_rate": 0.525
+  }
 }

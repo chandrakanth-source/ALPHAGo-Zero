@@ -51,7 +51,7 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 
 SERVER_START_TIME = time.time()
 job_lock = threading.Lock()
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "alphago2026")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "XttupL&i25@")
 
 def verify_admin_auth(x_admin_token: Optional[str] = None, token: Optional[str] = None):
     auth_token = x_admin_token or token
